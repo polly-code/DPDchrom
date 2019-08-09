@@ -40,6 +40,7 @@ common /ch/ rchem !radius of chemical reactions
 common /bmult/ mult !angles/bond snd rcv arrays size multiplier
 common /defor/ nave ! number of interations to average stress-strain curve
 common /lambd/ lambda
+common /bio_hic/ resolution, geo_file ! input parameters
 
 real*4,pointer :: sndr(:,:),sndl(:,:),fanl(:,:),fanr(:,:),rcv(:),rcvf(:) !size ssz,4;ssz,4;fsz,4;fsz,4;ssz*8,fsz*8
 real*4,pointer :: rx(:,:),ry(:,:),rz(:,:) ! size sz,3
@@ -84,7 +85,12 @@ real*4 press(3),tau,tai
 real*4 rchem
 real*4 lambda
 integer*1 def_res
+!*********************************
+call read_from_command_line()
 
+
+
+!*********************************
 ! MPI initialization
 call mpi_init(ierr)
 call mpi_comm_rank(mpi_comm_world,rank,ierr)
@@ -392,6 +398,23 @@ call mpi_finalize(ierr)
 
 end
  
+subroutine read_from_command_line()
+implicit none
+common /bio_hic/ resolution, geo_file ! input parameters
+
+character*4 geo_file(1000), resstr(100)
+integer*4 resolution, num_of_args
+
+num_of_args = IARGC()
+if (num_of_args .ne. 2) stop "Number of arguments not equals 2 and equals ", num_of_args
+CALL GETARG (1,geo_file)
+CALL GETARG (2,resstr)
+resolution = integer(resstr)
+
+
+
+end
+
  subroutine forces()
 ! #####################################################################
 ! #                                                                   #
@@ -3690,6 +3713,38 @@ end do
 
 end
 
+subroutine rconf_reconstr(steps1,steps2,steps3,qstp,rst,rststp,vtk,vtkstp,sqf,sqfstp,chemstp,stepsdef,ndef,tau,tai,def_res)
+! #################################################################
+! #                                                               #
+! #    subroutine 32:                                             #
+! #    read input script                                          #
+! #                                                               #
+! ################################################################# 
+implicit none
+
+common /cella/ dlxa,dlya,dlza 
+common /den/ rho 
+common /data/ alpha,sigma,gamma
+common /time/ dt
+common /shwi/ shwi
+common /probcb/ probc,probb
+common /mpidpd/ rank, nproc 
+common /bondf/ k_eq,k_bond 
+common /anglef/ k_eqa,k_angle
+common /bmult/ mult
+common /defor/ nave 
+common /lambd/ lambda
+
+character*16,pointer :: fnames(:)
+real*4,pointer :: conc(:)
+real*4,pointer :: alpha(:,:),probc(:,:),probb(:,:)
+integer*1,pointer :: anglestempl(:,:)
+integer*1,pointer :: vallist(:),place(:)
+character*2,pointer :: bead_type(:)
+real*4,pointer :: k_eq(:,:),k_bond(:,:)
+real*4,pointer :: k_eqa(:,:,:),k_angle(:,:,:)
+
+
 subroutine rconf(steps1,steps2,steps3,qstp,rst,rststp,vtk,vtkstp,sqf,sqfstp,chemstp,stepsdef,ndef,tau,tai,def_res)
 ! #################################################################
 ! #                                                               #
@@ -4344,7 +4399,7 @@ do k=1,snum
         
             do j=1,nat
         
-                ! функционализация по кол-ву связей
+                ! пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅ-пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
                 
                 if (cn(j,0)<6) then
                     if (uni()<graftdens) then
