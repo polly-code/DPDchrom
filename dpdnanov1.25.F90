@@ -431,8 +431,9 @@ integer*4 nlines=-1 !first line is a header
 
 open(14, file = geo_file, status = 'old')
 do
-    read(14,*,end=10)
+    read(14,*,end=10) chr1
     nlines=nlines+1
+end do
 do
     if (skip_1st_line) then
         skip_1st_line=.false.
