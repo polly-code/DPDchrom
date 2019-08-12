@@ -85,8 +85,10 @@ real*4 press(3),tau,tai
 real*4 rchem
 real*4 lambda
 integer*1 def_res
+integer*8 resolution
+character*256 geo_file
 !*********************************
-call read_from_command_line()
+
 
 
 
@@ -98,7 +100,7 @@ call mpi_comm_size(mpi_comm_world,nproc,ierr)
 
 ! randon number generator initialization
 vl=uni()
-
+call read_from_command_line()
 ! read input script
 call rconf(steps1,steps2,steps3,qstp,rst,rststp,vtk,vtkstp,sqf,sqfstp,chemstp,stepsdef,ndef,tau,tai,def_res)
 
@@ -402,18 +404,45 @@ subroutine read_from_command_line()
 implicit none
 common /bio_hic/ resolution, geo_file ! input parameters
 
-character*4 geo_file(1000), resstr(100)
-integer*4 resolution, num_of_args
+character*256 geo_file, resstr
+integer*8 resolution, num_of_args
 
 num_of_args = IARGC()
-if (num_of_args .ne. 2) stop 'Number of arguments not equals 2 and equals ', num_of_args
+if (num_of_args .ne. 2) stop 'Number of arguments not equals 2! The first one is filename, the second one is resolution. For example ". ./dpd name.geo 100000"'
 CALL GETARG (1,geo_file)
 CALL GETARG (2,resstr)
-resolution = integer(resstr)
- write(*,*) 'filename is ', geo_file, ', resolution is ', resolution
- stop 'Fuck you '
+read(resstr,'(i)') resolution
+!write(resstr, '(i10)') resolution
+!write(*,*) 'filename is ',geo_file,', resolution is ',resolution
 
 end
+
+subroutine read_geo()
+common /bio_input/ resolution, geo_file, contacts ! input parameters
+
+character*256 geo_file
+integer*8 resolution
+integer*4,pointer :: contacts(:,2)
+data skip_1st_line/.true./
+character*32 chr1,chr2
+integer*8 pos1,pos2
+character*32 strand1,strand2
+integer*4 nlines=-1 !first line is a header
+
+open(14, file = geo_file, status = 'old')
+do
+    read(14,*,end=10)
+    nlines=nlines+1
+do
+    if (skip_1st_line) then
+        skip_1st_line=.false.
+        cycle
+    end if
+    read(14,'(a,a,i,i,a,a)')chr1,chr1,pos1,pos2,strand1,strand2
+    nlines=nlines+1
+    contacts(num_cont,1)=pos1
+    contacts(num_cont,2)=pos2
+end do
 
  subroutine forces()
 ! #####################################################################
@@ -3713,38 +3742,38 @@ end do
 
 end
 
-subroutine rconf_reconstr(steps1,steps2,steps3,qstp,rst,rststp,vtk,vtkstp,sqf,sqfstp,chemstp,stepsdef,ndef,tau,tai,def_res)
+!subroutine rconf_reconstr(steps1,steps2,steps3,qstp,rst,rststp,vtk,vtkstp,sqf,sqfstp,chemstp,stepsdef,ndef,tau,tai,def_res)
 ! #################################################################
 ! #                                                               #
 ! #    subroutine 32:                                             #
 ! #    read input script                                          #
 ! #                                                               #
 ! ################################################################# 
-implicit none
+!implicit none
 
-common /cella/ dlxa,dlya,dlza 
-common /den/ rho 
-common /data/ alpha,sigma,gamma
-common /time/ dt
-common /shwi/ shwi
-common /probcb/ probc,probb
-common /mpidpd/ rank, nproc 
-common /bondf/ k_eq,k_bond 
-common /anglef/ k_eqa,k_angle
-common /bmult/ mult
-common /defor/ nave 
-common /lambd/ lambda
+!common /cella/ dlxa,dlya,dlza 
+!common /den/ rho 
+!common /data/ alpha,sigma,gamma
+!common /time/ dt
+!common /shwi/ shwi
+!common /probcb/ probc,probb
+!common /mpidpd/ rank, nproc 
+!common /bondf/ k_eq,k_bond 
+!common /anglef/ k_eqa,k_angle
+!common /bmult/ mult
+!common /defor/ nave 
+!common /lambd/ lambda
 
-character*16,pointer :: fnames(:)
-real*4,pointer :: conc(:)
-real*4,pointer :: alpha(:,:),probc(:,:),probb(:,:)
-integer*1,pointer :: anglestempl(:,:)
-integer*1,pointer :: vallist(:),place(:)
-character*2,pointer :: bead_type(:)
-real*4,pointer :: k_eq(:,:),k_bond(:,:)
-real*4,pointer :: k_eqa(:,:,:),k_angle(:,:,:)
+!character*16,pointer :: fnames(:)
+!real*4,pointer :: conc(:)
+!real*4,pointer :: alpha(:,:),probc(:,:),probb(:,:)
+!integer*1,pointer :: anglestempl(:,:)
+!integer*1,pointer :: vallist(:),place(:)
+!character*2,pointer :: bead_type(:)
+!real*4,pointer :: k_eq(:,:),k_bond(:,:)
+!real*4,pointer :: k_eqa(:,:,:),k_angle(:,:,:)
 
-
+!end
 subroutine rconf(steps1,steps2,steps3,qstp,rst,rststp,vtk,vtkstp,sqf,sqfstp,chemstp,stepsdef,ndef,tau,tai,def_res)
 ! #################################################################
 ! #                                                               #
