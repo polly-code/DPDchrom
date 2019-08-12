@@ -406,12 +406,12 @@ character*4 geo_file(1000), resstr(100)
 integer*4 resolution, num_of_args
 
 num_of_args = IARGC()
-if (num_of_args .ne. 2) stop "Number of arguments not equals 2 and equals ", num_of_args
+if (num_of_args .ne. 2) stop 'Number of arguments not equals 2 and equals ', num_of_args
 CALL GETARG (1,geo_file)
 CALL GETARG (2,resstr)
 resolution = integer(resstr)
-
-
+ write(*,*) 'filename is ', geo_file, ', resolution is ', resolution
+ stop 'Fuck you '
 
 end
 
