@@ -418,6 +418,13 @@ read(resstr,'(i)') resolution
 end
 
 subroutine read_geo()
+! #####################################################################
+! #                                                                   #
+! #   subroutine 0:                                                   #
+! #   read geo file                                                   #
+! #                                                                   #
+! #####################################################################
+implicit none
 common /bio_input/ resolution, geo_file, contacts ! input parameters
 
 character*256 geo_file
@@ -425,25 +432,72 @@ integer*8 resolution
 integer*4,pointer :: contacts(:,2)
 data skip_1st_line/.true./
 character*32 chr1,chr2
+character*32 :: chrName(100)
+integer*8 :: maxChrLength(100), minChrLength(100)
 integer*8 pos1,pos2
 character*32 strand1,strand2
 integer*4 nlines=-1 !first line is a header
+integer*4, pointer :: arrLengthsOfChains(:)
+data firstFlag/.false./
+data secondFlag/.false./
+integer*4 numberOfChr
 
+numberOfChr=0
+chrName='empty'
 open(14, file = geo_file, status = 'old')
-do
-    read(14,*,end=10) chr1
-    nlines=nlines+1
-end do
+
 do
     if (skip_1st_line) then
         skip_1st_line=.false.
         cycle
     end if
-    read(14,'(a,a,i,i,a,a)')chr1,chr1,pos1,pos2,strand1,strand2
+    read(14,'(a,a,i,i,a,a)')chr1,chr2,pos1,pos2,strand1,strand2
+
+
+    do i=1,100
+        if (.not.firstFlag .and.chrName(i)=='empty') then
+            chrName(i)=chr1
+            maxChrLength(i)=pos1
+            minChrLength(i)=pos1
+            numberOfChr=numberOfChr+1
+            firstFlag=.true.
+        else if (.not.firstFlag .and.chrName(i)==chr1) then
+            if (pos1>maxChrLength(i))maxChrLength(i)=pos1
+            if (pos1<minChrLength(i))minChrLength(i)=pos1
+            firstFlag=.true.
+        end if
+        if (.not.secondFlag .and. chrName(i)=='empty') then
+            chrName(i)=chr2
+            maxChrLength(i)=pos2
+            minChrLength(i)=pos2
+            numberOfChr=numberOfChr+1
+            secondFlag=.true.
+        else if (.not.secondFlag .and.chrName(i)==chr2) then
+            if (pos2>maxChrLength(i))maxChrLength(i)=pos2
+            if (pos2<minChrLength(i))minChrLength(i)=pos2
+            secondFlag=.true.
+        end if
+        if (firstFlag .and. secondFlag) then
+            firstFlag=.false.
+            secondFlag=.false.
+            exit
+        end if
+    end do
     nlines=nlines+1
-    contacts(num_cont,1)=pos1
-    contacts(num_cont,2)=pos2
 end do
+close(14, status = 'keep')
+open(14, file = geo_file, status = 'old')
+allocate(arrLengthsOfChains(numberOfChr))
+do i=1,numberOfChr
+    arrLengthsOfChains(i)=CEILING((maxChrLength(i)-minChrLength(i))/resolution)
+end do
+totalNumberOfChainBeads = sum(arrLengthsOfChains)
+
+do
+    read(14,*,end=10) chr1
+    nlines=nlines+1
+end do
+end
 
  subroutine forces()
 ! #####################################################################
