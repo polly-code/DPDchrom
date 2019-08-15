@@ -426,10 +426,12 @@ subroutine read_geo()
 ! #####################################################################
 implicit none
 common /bio_input/ resolution, geo_file, contacts ! input parameters
+common /cella/ dlxa,dlya,dlza
+common /den/ rho
 
 character*256 geo_file
 integer*8 resolution
-integer*4,pointer :: contacts(:,2)
+integer*4,pointer :: contacts(:,:)
 data skip_1st_line/.true./
 character*32 chr1,chr2
 character*32 :: chrName(100)
@@ -440,7 +442,8 @@ integer*4 nlines=-1 !first line is a header
 integer*4, pointer :: arrLengthsOfChains(:)
 data firstFlag/.false./
 data secondFlag/.false./
-integer*4 numberOfChr
+integer*4 numberOfChr, iter
+real*4 dlxa,dlya,dlza, rho
 
 numberOfChr=0
 chrName='empty'
@@ -492,12 +495,35 @@ do i=1,numberOfChr
     arrLengthsOfChains(i)=CEILING((maxChrLength(i)-minChrLength(i))/resolution)
 end do
 totalNumberOfChainBeads = sum(arrLengthsOfChains)
+allocate(contacts(totalNumberOfChainBeads**2,2))
+contacts=0
+iter=1
+do i=1,totalNumberOfChainBeads
+    if(.not. any(arrLengthsOfChains==i)) then
+        contacts(iter,1)=i
+        contacts(iter,2)=i+1
+        iter=iter+1
+    end if
+end do
 
 do
-    read(14,*,end=10) chr1
-    nlines=nlines+1
+    read(14,'(a,a,i,i,a,a)')chr1,chr2,pos1,pos2,strand1,strand2
+    do i=1,numberOfChr
+        if (chr1==chrName(i)) globalPos1=sum(arrLengthsOfChains(1,i-1))+ceiling((pos1-minChrLength(i))/resolution)
+        if (chr2==chrName(i)) globalPos2=sum(arrLengthsOfChains(1,i-1))+ceiling((pos2-minChrLength(i))/resolution)
+        contacts(iter,1)=globalPos1
+        contacts(iter,2)=globalPos2
+        iter=iter+1    
 end do
 close(14, status = 'keep')
+!calculate dlxa dlyz dlza and matrix of connectivity
+do i=1,numberOfChr
+    call rndplace( arrLengthsOfChains(i),rxt,ryt,rzt,cn2,dlxa,dlya,dlza, 4 )
+    rndposx = 0
+    rndposy = 0
+    rndposz = 0
+end do
+
 end
 
  subroutine forces()
@@ -4298,216 +4324,6 @@ nbcur=0
 
 ! loop over species files
 do k=1,snum
-    if (fnames(k)(1:trimtext(fnames(k)))=='nanotube.gen') then
-
-        nat=ntlength*7-1
-        nbd=25*ntlength-20
-        nmol=npallt*conc(k)/nat/100.0
-    
-        allocate (rxt(nat),ryt(nat),rzt(nat),kindpt(nat))
-        allocate (b1(nbd),b2(nbd),bt(nbd))
-
-        do j=0,ntlength-1
-            rxt(j*6+1)=0
-            ryt(j*6+1)=1.0
-            rzt(j*6+1)=real(j)
-
-            rxt(j*6+2)=sqrt(3.0)/2
-            ryt(j*6+2)=0.5
-            rzt(j*6+2)=real(j)
-
-            rxt(j*6+3)=sqrt(3.0)/2
-            ryt(j*6+3)=-0.5
-            rzt(j*6+3)=real(j)
-
-            rxt(j*6+4)=0
-            ryt(j*6+4)=-1.0
-            rzt(j*6+4)=real(j)
-
-            rxt(j*6+5)=-sqrt(3.0)/2
-            ryt(j*6+5)=-0.5
-            rzt(j*6+5)=real(j)
-
-            rxt(j*6+6)=-sqrt(3.0)/2
-            ryt(j*6+6)=0.5
-            rzt(j*6+6)=real(j)
-    
-        end do
-        do j=0,ntlength-2
-            rxt(ntlength*6+1+j)=0
-            ryt(ntlength*6+1+j)=0
-            rzt(ntlength*6+1+j)=real(j)+0.5
-        end do
-        kindpt=6
-        kindpt(1:6*ntlength)=3
-
-        !bonds
-        do j=0,ntlength-1
-            do i=1, 5
-                b1(j*6+i)=i+j*6
-                b2(j*6+i)=i+1+j*6
-            end do
-            b1(j*6+6)=6+j*6
-            b2(j*6+6)=1+j*6
-        end do
-
-
-        do j=0,ntlength-2
-            do i=1, 6
-                b1(ntlength*6+i+j*6)=i+j*6
-                b2(ntlength*6+i+j*6)=i+6+j*6
-            end do
-
-        end do
-
-
-        do i=1, ntlength-2
-            b1(ntlength*12-6+i)=ntlength*6+i
-            b2(ntlength*12-6+i)=ntlength*6+1+i
-        end do
-
-        do j=0,ntlength-2
-            do i=1,12
-                b1(ntlength*13-8+i+j*12)=i+j*6
-                b2(ntlength*13-8+i+j*12)=ntlength*6+1+j
-            end do
-        end do
-
-        do i=1,nmol
-        
-            call rndrot(nat,rxt,ryt,rzt)
-            rndposx=(uni())*dlxa
-            rndposy=(uni())*dlya
-            rndposz=(uni())*dlza
-        
-            do j=1,nat
-                if (kindpt(j)==3) then
-                    if (uni()<graftdens) then
-                        write(1,'(2i4,3f14.6)')vallist(1), 1,rxt(j)+rndposx,ryt(j)+rndposy,rzt(j)+rndposz
-                    else
-                        write(1,'(2i4,3f14.6)')0, kindpt(j),rxt(j)+rndposx,ryt(j)+rndposy,rzt(j)+rndposz
-                    end if
-                else
-                    write(1,'(2i4,3f14.6)')0, kindpt(j),rxt(j)+rndposx,ryt(j)+rndposy,rzt(j)+rndposz
-                end if
-                natmsall=natmsall+1
-            end do
-
-            ! output bonds
-            do j=1,nbd
-                write(2,'(2i8)'),b1(j)+nbcur,b2(j)+nbcur
-                nbondsall=nbondsall+1
-            end do
-        
-            do j=1,ntlength-2
-                write(3,'(3i8)') (j-1)*6+1+nbcur,(j-1)*6+1+6+nbcur,(j-1)*6+1+12+nbcur
-                write(3,'(3i8)') (j-1)*6+1+1+nbcur,(j-1)*6+1+7+nbcur,(j-1)*6+1+13+nbcur
-                write(3,'(3i8)') (j-1)*6+1+2+nbcur,(j-1)*6+1+8+nbcur,(j-1)*6+1+14+nbcur
-                write(3,'(3i8)') (j-1)*6+1+3+nbcur,(j-1)*6+1+9+nbcur,(j-1)*6+1+15+nbcur
-                write(3,'(3i8)') (j-1)*6+1+4+nbcur,(j-1)*6+1+10+nbcur,(j-1)*6+1+16+nbcur
-                write(3,'(3i8)') (j-1)*6+1+5+nbcur,(j-1)*6+1+11+nbcur,(j-1)*6+1+17+nbcur
-                nanglesall=nanglesall+6
-            end do
-            do j=1,ntlength-3
-                write(3,'(3i8)') ntlength*6+j+nbcur,ntlength*6+j+1+nbcur,ntlength*6+j+2+nbcur
-                nanglesall=nanglesall+1
-            end do
-
-            nbcur=nat+nbcur
-        end do
-
-        ! delete temporary arrays
-        nullify(rxt,ryt,rzt,kindpt,b1,b2,bt)
-    elseif (fnames(k)(1:trimtext(fnames(k)))=='sphere.gen') then
-        rb=0.7
-        nat=0
-        do i=-int(sphrad/0.61)-1,int(sphrad/0.61)+1
-            do j=-int(sphrad/0.61)-1,int(sphrad/0.61)+1
-                do l=-int(sphrad/0.61)-1,int(sphrad/0.61)+1
-                    rsq=sqrt((i*0.61)**2+(j*0.61)**2+(l*0.61)**2)
-                    if (rsq>sphrad) cycle    
-                    nat=nat+1
-                end do
-            end do
-        end do
-
-        nmol=npallt*conc(k)/nat/100.0
-
-        allocate (rxt(nat),ryt(nat),rzt(nat),kindpt(nat))
-        kindpt=3
-        nat=0
-
-        do i=-int(sphrad/0.61)-1,int(sphrad/0.61)+1
-            do j=-int(sphrad/0.61)-1,int(sphrad/0.61)+1
-                do l=-int(sphrad/0.61)-1,int(sphrad/0.61)+1
-                    rsq=sqrt((i*0.61)**2+(j*0.61)**2+(l*0.61)**2)
-                    if (rsq>sphrad) cycle    
-                    nat=nat+1
-                    rxt(nat)=i*0.61
-                    ryt(nat)=j*0.61
-                    rzt(nat)=l*0.61
-                end do
-            end do
-        end do
-
-    
-        nbd=0
-        do i=1,nat
-            do j=i+1,nat
-                rsq=sqrt((rxt(i)-rxt(j))**2+(ryt(i)-ryt(j))**2+(rzt(i)-rzt(j))**2)
-                if (rsq<=rb) nbd=nbd+1
-            end do
-        end do
-    
-        allocate (b1(nbd),b2(nbd),bt(nbd))
-        allocate(cn(nat,0:0))
-        cn=0
-        nbd=0
-        do i=1,nat
-            do j=i+1,nat
-                rsq=sqrt((rxt(i)-rxt(j))**2+(ryt(i)-ryt(j))**2+(rzt(i)-rzt(j))**2)
-                if (rsq<=rb) then
-                    nbd=nbd+1
-                    b1(nbd)=i
-                    b2(nbd)=j
-                    cn(i,0)=cn(i,0)+1
-                    cn(j,0)=cn(j,0)+1
-                end if
-            end do
-        end do
-
-        do i=1,nmol
-            call rndrot(nat,rxt,ryt,rzt)
-            rndposx=(uni())*dlxa
-            rndposy=(uni())*dlya
-            rndposz=(uni())*dlza
-        
-            do j=1,nat
-        
-                ! ���������������� �� ���-�� ������
-                
-                if (cn(j,0)<6) then
-                    if (uni()<graftdens) then
-                        write(1,'(2i4,3f14.6)')vallist(1), 1,rxt(j)+rndposx,ryt(j)+rndposy,rzt(j)+rndposz
-                    else
-                        write(1,'(2i4,3f14.6)')0, kindpt(j),rxt(j)+rndposx,ryt(j)+rndposy,rzt(j)+rndposz
-                    end if
-                end if
-                if (cn(j,0)==6) write(1,'(2i4,3f14.6)')0,6,rxt(j)+rndposx,ryt(j)+rndposy,rzt(j)+rndposz
-                natmsall=natmsall+1
-            end do
-
-            ! output bonds
-            do j=1,nbd
-                write(2,'(2i8)'),b1(j)+nbcur,b2(j)+nbcur
-                nbondsall=nbondsall+1
-            end do
-
-            nbcur=nat+nbcur
-        end do
-        nullify(rxt,ryt,rzt,kindpt,b1,b2,bt,cn)
-
-    else
         inquire( file = fnames(k)(1:trimtext(fnames(k))), exist = exists )
         if ( .not. exists ) call error(341)
         open(10, file = fnames(k)(1:trimtext(fnames(k))))
@@ -4649,7 +4465,6 @@ do k=1,snum
         ! delete temporary arrays
         nullify (cn,cn2)
         nullify(rxt,ryt,rzt,kindpt,b1,b2,bt)
-    end if
 end do
 close(3)
 close(2)
