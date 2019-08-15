@@ -497,6 +497,7 @@ do
     read(14,*,end=10) chr1
     nlines=nlines+1
 end do
+close(14, status = 'keep')
 end
 
  subroutine forces()
