@@ -3419,6 +3419,7 @@ return
 10 call error(3212)    !   stop 'error:t1 error'
 11 call error(3213)    !   stop 'error:tch error'
 12 call error(3214)    !   stop 'error:alpha error'
+!13 all error()
 14 call error(3216)    !   stop 'there is no dpdconf.dat file! '
 15 call error(3217)    !   stop 'error:density error!'
 16 call error(3218)    !   stop 'output_freq error'
