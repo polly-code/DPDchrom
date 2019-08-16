@@ -444,7 +444,10 @@ data firstFlag/.false./
 data secondFlag/.false./
 integer*4 numberOfChr, iter
 real*4 dlxa,dlya,dlza, rho
+real*4,pointer :: rxt(:),ryt(:),rzt(:)
+integer*4,pointer :: cn(:,:),cn2(:,:)
 
+real*4 rho
 numberOfChr=0
 chrName='empty'
 open(14, file = geo_file, status = 'old')
@@ -513,13 +516,15 @@ do
         if (chr2==chrName(i)) globalPos2=sum(arrLengthsOfChains(1,i-1))+ceiling((pos2-minChrLength(i))/resolution)
         contacts(iter,1)=globalPos1
         contacts(iter,2)=globalPos2
-        iter=iter+1    
+        iter=iter+1 
+    end do
 end do
 close(14, status = 'keep')
 allocate(cn(nat,0:0),cn2(nat,0:0)) 
 cn=0
 cn2=0
-do i = 1, iter-1
+nbondsall=iter-1
+do i = 1, nbondsall
     cn2(contacts(i,1),0)=cn2(contacts(i,1),0)+1
     cn2(contacts(i,2),0)=cn2(contacts(i,2),0)+1
 end do
@@ -528,25 +533,29 @@ nbmax2=maxval(cn2(:,0))
 nullify (cn,cn2)
 allocate (cn(nat,0:nbmax),cn2(nat,0:nbmax2))
 
-! constuct connection matrixes for 2 types of bonds: for all bonds and only for double bonds
+! constuct connection matrices for all bonds
 cn=0
 cn2=0
-do i = 1, iter-1
-    i1=b1contacts(i,1)
-    i2=b2contacts(i,2)
-    if(bt(i)==2) then
-      cn(i1,0) = cn(i1,0) + 1
-      cn(i1,cn(i1,0)) = i2
-      cn(i2,0) = cn(i2,0) + 1
-      cn(i2,cn(i2,0)) = i1
-    end if
+do i = 1, nbondsall
+    i1=contacts(i,1)
+    i2=contacts(i,2)
     cn2(i1,0) = cn2(i1,0) + 1
     cn2(i1,cn2(i1,0)) = i2
     cn2(i2,0) = cn2(i2,0) + 1
     cn2(i2,cn2(i2,0)) = i1
 end do
-dlxa
-!calculate dlxa dlyz dlza and matrix of connectivity
+
+!calculate the size of simulation box
+dlxa=(totalNumberOfChainBeads/3.)**(1./3.)*2+1
+dlya=dlxa
+dlza=dlxa
+natmsall=dlxa**3*rho
+totalNumberOfSolvent=natmsall-totalNumberOfChainBeads
+open(3, file = 'restart.dat',status='replace' )
+write(3,'(i8,f8.4)') natmsall, rho
+write(3,'(3f20.12)') dlxa,dlya,dlza
+
+iter=1
 do i=1,numberOfChr
     allocate(rxt(arrLengthsOfChains(i)),ryt(arrLengthsOfChains(i)),rzt(arrLengthsOfChains(i)))
     call rndplace( arrLengthsOfChains(i),rxt,ryt,rzt,cn2,dlxa/2-1,dlya/2-1,dlza/2-1, 4 )
@@ -554,9 +563,21 @@ do i=1,numberOfChr
     rndposy = 0
     rndposz = 0
     do j=1,arrLengthsOfChains(i)
-        kindpt(sum(arrLengthsOfChains(1,i)+j))=1
+        write(1,'(i8,2i4,3f14.6)')iter, zero, one, rxt(j), ryt(j), rzt(j)
+    end do
+    deallocate(rxt(),ryt(),rzt())
+end do
+do i=1,totalNumberOfSolvent
+    write(1,'(i8,2i4,3f14.6)')iter, zero, two, dlxa*uni(), dlya*uni(), dlza*uni()
 end do
 
+! move information about bonds
+write(3,'(a9,i9)') ' bonds:  ',nbondsall
+do i=1,nbondsall
+    write(3,'(2i8)') contacts(i,1), contacts(i,2)
+end do
+write(3,'(a9,i9)') ' angles:  ',zero
+close(3)
 end
 
  subroutine forces()
