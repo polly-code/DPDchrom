@@ -35,12 +35,10 @@ common /top/ cln,nrow,ncol ! number of nodes in 1 row,row and column number of n
 common /angl/ ca,angles ! main angle arrays
 common /prs/ press ! pressure
 common /vale/ val !valencies
-common /probcb/ probc,probb !probabilities of chemical reactions
-common /ch/ rchem !radius of chemical reactions
 common /bmult/ mult !angles/bond snd rcv arrays size multiplier
 common /defor/ nave ! number of interations to average stress-strain curve
 common /lambd/ lambda
-common /bio_hic/ resolution, geo_file ! input parameters
+common /bio_input/ resolution, geo_file, contacts ! input parameters
 
 real*4,pointer :: sndr(:,:),sndl(:,:),fanl(:,:),fanr(:,:),rcv(:),rcvf(:) !size ssz,4;ssz,4;fsz,4;fsz,4;ssz*8,fsz*8
 real*4,pointer :: rx(:,:),ry(:,:),rz(:,:) ! size sz,3
@@ -51,13 +49,14 @@ integer*1,pointer :: kindp(:,:) ! size sz,3
 integer*4,pointer :: corr(:,:),bcorr(:)! size sz,3 and npall
 integer*1,pointer :: bcorrt(:) !size npall
 integer*4,pointer :: fann(:,:) !size fsz/8,4
+integer*4,pointer :: contacts(:,:) !size nbnd,2
 real*4,pointer :: fsend(:) ! size 3*fsz/2
 integer*4,pointer :: cn(:,:) !size npall,0:maximum number of bonds
 integer*1,pointer :: kindpall(:) ! size npall
 integer*4,pointer :: ca(:,:) !size npall, 0: maximum number of angles
 integer*4,pointer :: angles(:) !size 3*nangles
 integer*1,pointer :: val(:) !size npall
-real*4,pointer :: alpha(:,:),probc(:,:),probb(:,:) !size 10,10
+real*4,pointer :: alpha(:,:) !size 10,10
 real*4,pointer :: k_eq(:,:),k_bond(:,:) !size 10,10
 real*4,pointer :: k_eqa(:,:,:),k_angle(:,:,:) !size 10,10,10
 
@@ -67,8 +66,8 @@ real*4 uni
 integer*4 sz,ssz,fsz,npall
 integer*4 ilx,ily,ilz
 integer ierr
-integer*4 steps1,steps2,steps3,qstp,rststp,sqfstp,vtkstp,nstp,chemstp,stepsdef,ndef,nave
-integer*4 kpbc,rst,sqf,vtk
+integer*4 steps1,steps2,steps3,qstp,rststp,nstp,stepsdef,ndef,nave
+integer*4 kpbc,rst
 real*4 dlx,dly,dlz,rcut,dlxtar
 real*4 dlxa,dlya,dlza
 integer*4 rcou(4)
@@ -82,17 +81,11 @@ real*8 start
 integer*1 typelist(10),ntype
 integer*4 i,j,curdef
 real*4 press(3),tau,tai
-real*4 rchem
 real*4 lambda
 integer*1 def_res
 integer*8 resolution
 character*256 geo_file
-!*********************************
 
-
-
-
-!*********************************
 ! MPI initialization
 call mpi_init(ierr)
 call mpi_comm_rank(mpi_comm_world,rank,ierr)
@@ -101,8 +94,14 @@ call mpi_comm_size(mpi_comm_world,nproc,ierr)
 ! randon number generator initialization
 vl=uni()
 call read_from_command_line()
+if (rank==0) then
+    write(*,*) geo_file, resolution
+    call read_geo()
+end if
+call barrier
+stop 'check the restart file'
 ! read input script
-call rconf(steps1,steps2,steps3,qstp,rst,rststp,vtk,vtkstp,sqf,sqfstp,chemstp,stepsdef,ndef,tau,tai,def_res)
+call rconf(steps1,steps2,steps3,qstp,rst,rststp,stepsdef,ndef,tau,tai,def_res)
 
 ! read restart.dat file
 call readrst()
@@ -150,17 +149,8 @@ if(rank==0) then
         end do
     end do
 
-    do i=1,ntype
-        do j=i,ntype
-            write(*,*) 'Chem probabilities btw',typelist(i),'and',typelist(j),'are',probc(typelist(i),typelist(j)),probb(typelist(i),typelist(j))
-        end do
-    end do
-
     write(*,*)
 end if
-
-! output vtk file
-if(vtk==1) call dpd2vtk()
 
 ! calculate forces
 fsend=0
@@ -184,9 +174,6 @@ do nstp=1,steps1
 
     ! integrate beads velocoties
     call intv()
-
-    ! output vtk file
-    if (mod(nstp,vtkstp)==0.and.vtk==1) call dpd2vtk()
     
     ! control output
     if (mod(nstp,qstp)==0) then
@@ -215,9 +202,6 @@ k_bond=k_bond*5.0
 ! output time
 if (rank==0) write(*,*) 'stage 1 took',mpi_wtime()-start,'s'
 
-! output VTK file
-if (vtk==1) call dpd2vtk()
-
 ! output restart file
 if (rst==1) call writerst()
 
@@ -235,12 +219,6 @@ do nstp=1,steps2
 
     ! integrate beads velocoties
     call intv()
-
-    ! output VTK file
-    if (mod(nstp,vtkstp)==0.and.vtk==1) call dpd2vtk()
-
-    ! perform reactions
-    if (mod(nstp,chemstp)==0) call chem()
 
     ! control output
     if (mod(nstp,qstp)==0) then
@@ -267,13 +245,10 @@ end do
 ! output time
 if (rank==0) write(*,*) 'stage 2 took',mpi_wtime()-start,'s'
 
-! output VTK file
-if (vtk==1) call dpd2vtk()
-
 ! output restart file
 if (rst==1) call writerst()
 
-! start 3rd stage - equilibration and sq stage
+! start 3rd stage - equilibration
 if (rank==0) start=mpi_wtime()
 do nstp=1,steps3
 
@@ -287,14 +262,6 @@ do nstp=1,steps3
 
     ! integrate beads velocoties
     call intv()
-
-    ! output VTK file
-    if (mod(nstp,vtkstp)==0.and.vtk==1) call dpd2vtk()
-
-    ! calculate structure factor
-    if (mod(nstp,sqfstp)==0) then
-        if (sqf==1) call sqs()
-    end if
 
     ! control output
     if (mod(nstp,qstp)==0) then
@@ -321,9 +288,6 @@ end do
 ! output time
 if (rank==0) write(*,*) 'stage 3 took',mpi_wtime()-start,'s'
 
-! output VTK file
-if (vtk==1) call dpd2vtk()
-
 ! output restart file
 if (rst==1) call writerst()
 
@@ -345,9 +309,6 @@ do curdef=0,ndef
 
         ! integrate velocities
         call intv()
-
-        ! output VTK file
-        if (mod(nstp,vtkstp)==0.and.vtk==1) call dpd2vtk()
 
         ! perform system affine deformation
         if(tau>0.and.dlxa<dlxtar.and.mod(nstp,100)==0) call deform(tau,tai)
@@ -388,9 +349,6 @@ end do
 ! output time
 if (rank==0) write(*,*) 'stage def took',mpi_wtime()-start,'s'
 
-! output VTK file
-if (vtk==1) call dpd2vtk()
-
 ! delete arrays
 call barrier
 nullify(rx,ry,rz,vwx,vwy,vwz,fx,fy,fz,vx,vy,vz,kindp,corr,bcorr,bcorrt,sndr,sndl,fanl,rcv,rcvf,fann,fsend)
@@ -399,13 +357,90 @@ nullify(rx,ry,rz,vwx,vwy,vwz,fx,fy,fz,vx,vy,vz,kindp,corr,bcorr,bcorrt,sndr,sndl
 call mpi_finalize(ierr)
 
 end
- 
-subroutine read_from_command_line()
+
+real*4 function uni()
+! #####################################################################
+! #                                                                   #
+! #   function 5:                                                     #
+! # random number generator based on the universal random number      #
+! # generator of marsaglia, zaman and tsang                           #
+! # (stats and prob. lett. 8 (1990) 35-39.)                           #
+! #                                                                   #
+! # it must be called once to initialise parameters u,c,cd,cm         #
+! #                                                                   #
+! #####################################################################
 implicit none
-common /bio_hic/ resolution, geo_file ! input parameters
+
+common /mpidpd/ rank, nproc
+logical,save :: init
+data init /.true./
+integer,save :: ir,jr
+integer i,ii,j,jj,k,l,m,idnode
+real*8,save :: c,cd,cm,u(1:97)
+real*8 s,t
+integer*4 nproc,rank
+      
+
+! initialise parameters u,c,cd,cm
+if (init) then
+    init = .false.
+
+! initial values of i,j,k must be in range 1 to 178 (not all 1)
+! initial value of l must be in range 0 to 168
+    i = mod(rank,166) + 12
+    j = mod(rank,144) + 34
+    k = mod(rank,122) + 56
+    l = mod(rank,90)  + 78
+    ir = 97
+    jr = 33
+    do ii=1,97
+        s = 0.0d0
+        t = 0.5d0
+        do jj=1,24
+            m = mod(mod(i*j,179)*k,179)
+            i = j
+            j = k
+            k = m
+            l = mod(53*l+1,169)
+            if (mod(l*m,64)>=32) s = s+t
+            t = 0.5d0*t
+        end do
+        u(ii)=s
+    end do
+    c  =   362436.0d0/16777216.0d0
+    cd =  7654321.0d0/16777216.0d0
+    cm = 16777213.0d0/16777216.0d0
+end if
+
+! calculate random number
+uni=u(ir)-u(jr)
+if (uni < 0.0d0) uni = uni + 1.0d0
+u(ir)=uni
+ir=ir-1
+if (ir == 0) ir = 97
+jr=jr-1
+if (jr == 0) jr = 97
+c = c-cd
+if (c < 0.0d0) c = c+cm
+uni = uni-c
+if (uni < 0.0d0) uni = uni + 1.0d0
+
+end
+
+subroutine read_from_command_line()
+! #####################################################################
+! #                                                                   #
+! #   subroutine -1:                                                  #
+! #   read geo file                                                   #
+! #                                                                   #
+! #####################################################################
+implicit none
+save
+common /bio_input/ resolution, geo_file, contacts ! input parameters
 
 character*256 geo_file, resstr
 integer*8 resolution, num_of_args
+integer*4,pointer :: contacts(:,:)
 
 num_of_args = IARGC()
 if (num_of_args .ne. 2) stop 'Number of arguments not equals 2! The first one is filename, the second one is resolution. For example ". ./dpd name.geo 100000"'
@@ -413,7 +448,7 @@ CALL GETARG (1,geo_file)
 CALL GETARG (2,resstr)
 read(resstr,'(i)') resolution
 !write(resstr, '(i10)') resolution
-!write(*,*) 'filename is ',geo_file,', resolution is ',resolution
+write(*,*) 'filename is ',geo_file,'resolution is',resolution
 
 end
 
@@ -425,43 +460,67 @@ subroutine read_geo()
 ! #                                                                   #
 ! #####################################################################
 implicit none
+save
 common /bio_input/ resolution, geo_file, contacts ! input parameters
 common /cella/ dlxa,dlya,dlza
 common /den/ rho
+!common /data/ alpha,sigma,gamma
+!common /time/ dt
+!common /shwi/ shwi
+!common /mpidpd/ rank, nproc 
+!common /bondf/ k_eq,k_bond 
+!common /anglef/ k_eqa,k_angle
+!common /bmult/ mult
+!common /defor/ nave 
+!common /lambd/ lambda
 
-character*256 geo_file
-integer*8 resolution
-integer*4,pointer :: contacts(:,:)
-data skip_1st_line/.true./
-character*32 chr1,chr2
-character*32 :: chrName(100)
 integer*8 :: maxChrLength(100), minChrLength(100)
-integer*8 pos1,pos2
-character*32 strand1,strand2
-integer*4 nlines=-1 !first line is a header
+integer*4,pointer :: contacts(:,:)
+integer*4,pointer :: cn(:,:),cn2(:,:)
 integer*4, pointer :: arrLengthsOfChains(:)
+real*4,pointer :: rxt(:),ryt(:),rzt(:)
+character*32 :: chrName(100)
+
+integer*8 resolution
+integer*8 pos1,pos2
+integer*4 nlines
+integer*4 numberOfChr, iter
+integer*4 zero, one, two
+integer*4 i,j, i1, i2,nbmax2,natmsall,nbondsall,nbmax
+integer*4 totalNumberOfSolvent,totalNumberOfChainBeads
+integer*4 globalPos1, globalPos2
+real*4 dlxa,dlya,dlza, rho
+real*4 rndposx, rndposy, rndposz
+real*4 uni
+character*32 chr1,chr2
+character*32 strand1,strand2
+character*256 geo_file, trash_line, test_line(6)
+logical firstFlag, secondFlag, skip_1st_line
+
 data firstFlag/.false./
 data secondFlag/.false./
-integer*4 numberOfChr, iter
-real*4 dlxa,dlya,dlza, rho
-real*4,pointer :: rxt(:),ryt(:),rzt(:)
-integer*4,pointer :: cn(:,:),cn2(:,:)
+data skip_1st_line/.true./
 
-real*4 rho
+zero=0
+one=1
+two=2
 numberOfChr=0
+nlines=-1 !first line is a header
 chrName='empty'
+write(*,*) geo_file, resolution
+!call system("sed -i -- 's/,/    /g'" // geo_file)
 open(14, file = geo_file, status = 'old')
 
 do
     if (skip_1st_line) then
         skip_1st_line=.false.
+        read(14,'(a)') trash_line
         cycle
     end if
-    read(14,'(a,a,i,i,a,a)')chr1,chr2,pos1,pos2,strand1,strand2
-
+    read(14,*)chr1,chr2,pos1,pos2,strand1,strand2
 
     do i=1,100
-        if (.not.firstFlag .and.chrName(i)=='empty') then
+        if ((.not. firstFlag) .and. (chrName(i)=='empty')) then
             chrName(i)=chr1
             maxChrLength(i)=pos1
             minChrLength(i)=pos1
@@ -495,7 +554,7 @@ close(14, status = 'keep')
 open(14, file = geo_file, status = 'old')
 allocate(arrLengthsOfChains(numberOfChr))
 do i=1,numberOfChr
-    arrLengthsOfChains(i)=CEILING((maxChrLength(i)-minChrLength(i))/resolution)
+    arrLengthsOfChains(i)=CEILING(real(maxChrLength(i)-minChrLength(i))/real(resolution))
 end do
 totalNumberOfChainBeads = sum(arrLengthsOfChains)
 allocate(contacts(totalNumberOfChainBeads**2,2))
@@ -508,19 +567,35 @@ do i=1,totalNumberOfChainBeads
         iter=iter+1
     end if
 end do
-
+skip_1st_line=.true.
 do
-    read(14,'(a,a,i,i,a,a)')chr1,chr2,pos1,pos2,strand1,strand2
+    if (skip_1st_line) then
+        skip_1st_line=.false.
+        read(14,'(a)') trash_line
+        cycle
+    end if
+    read(14,*)chr1,chr2,pos1,pos2,strand1,strand2
+    write(*,*) 'chr1 ',chr1,'chr2 ',chr2,'pos1 ',pos1,'pos2 ',pos2,'strand1 ',strand1,'strand2 ',strand2
     do i=1,numberOfChr
-        if (chr1==chrName(i)) globalPos1=sum(arrLengthsOfChains(1,i-1))+ceiling((pos1-minChrLength(i))/resolution)
-        if (chr2==chrName(i)) globalPos2=sum(arrLengthsOfChains(1,i-1))+ceiling((pos2-minChrLength(i))/resolution)
-        contacts(iter,1)=globalPos1
-        contacts(iter,2)=globalPos2
-        iter=iter+1 
+        if (chr1==chrName(i)) globalPos1=sum(arrLengthsOfChains(1: i-1))+ceiling(real(pos1-minChrLength(i))/real(resolution))
+        if (chr2==chrName(i)) globalPos2=sum(arrLengthsOfChains(1: i-1))+ceiling(real(pos2-minChrLength(i))/real(resolution))
+        if (abs(globalPos1-globalPos2)>1) then
+            contacts(iter,1)=globalPos1
+            contacts(iter,2)=globalPos2
+            iter=iter+1
+        end if
     end do
 end do
 close(14, status = 'keep')
-allocate(cn(nat,0:0),cn2(nat,0:0)) 
+
+!calculate the size of simulation box
+dlxa=(totalNumberOfChainBeads/3.)**(1./3.)*2+1
+dlya=dlxa
+dlza=dlxa
+natmsall=dlxa**3*rho
+totalNumberOfSolvent=natmsall-totalNumberOfChainBeads
+
+allocate(cn(natmsall,0:0),cn2(natmsall,0:0)) 
 cn=0
 cn2=0
 nbondsall=iter-1
@@ -531,7 +606,7 @@ end do
 nbmax=maxval(cn(:,0))
 nbmax2=maxval(cn2(:,0))
 nullify (cn,cn2)
-allocate (cn(nat,0:nbmax),cn2(nat,0:nbmax2))
+allocate (cn(natmsall,0:nbmax),cn2(natmsall,0:nbmax2))
 
 ! constuct connection matrices for all bonds
 cn=0
@@ -545,33 +620,34 @@ do i = 1, nbondsall
     cn2(i2,cn2(i2,0)) = i1
 end do
 
-!calculate the size of simulation box
-dlxa=(totalNumberOfChainBeads/3.)**(1./3.)*2+1
-dlya=dlxa
-dlza=dlxa
-natmsall=dlxa**3*rho
-totalNumberOfSolvent=natmsall-totalNumberOfChainBeads
+!write the data to restart file
 open(3, file = 'restart.dat',status='replace' )
 write(3,'(i8,f8.4)') natmsall, rho
 write(3,'(3f20.12)') dlxa,dlya,dlza
 
 iter=1
+allocate(rxt(natmsall),ryt(natmsall),rzt(natmsall))
 do i=1,numberOfChr
-    allocate(rxt(arrLengthsOfChains(i)),ryt(arrLengthsOfChains(i)),rzt(arrLengthsOfChains(i)))
+    
     call rndplace( arrLengthsOfChains(i),rxt,ryt,rzt,cn2,dlxa/2-1,dlya/2-1,dlza/2-1, 4 )
     rndposx = 0
     rndposy = 0
     rndposz = 0
     do j=1,arrLengthsOfChains(i)
         write(1,'(i8,2i4,3f14.6)')iter, zero, one, rxt(j), ryt(j), rzt(j)
+        iter=iter+1
     end do
-    deallocate(rxt(),ryt(),rzt())
+    nullify(rxt,ryt,rzt)
 end do
 do i=1,totalNumberOfSolvent
-    write(1,'(i8,2i4,3f14.6)')iter, zero, two, dlxa*uni(), dlya*uni(), dlza*uni()
+    rndposx=dlxa*uni()
+    rndposy=dlya*uni()
+    rndposz=dlza*uni()
+    write(1,'(i8,2i4,3f14.6)')iter, zero, two, rndposx, rndposy, rndposz
+    iter=iter+1
 end do
 
-! move information about bonds
+! write information about bonds
 write(3,'(a9,i9)') ' bonds:  ',nbondsall
 do i=1,nbondsall
     write(3,'(2i8)') contacts(i,1), contacts(i,2)
@@ -1060,75 +1136,6 @@ do m=1,4
     end do
 end do
 fsend=0
-
-end
-    
-real*4 function uni()
-! #####################################################################
-! #                                                                   #
-! #   function 5:                                                     #
-! # random number generator based on the universal random number      #
-! # generator of marsaglia, zaman and tsang                           #
-! # (stats and prob. lett. 8 (1990) 35-39.)                           #
-! #                                                                   #
-! # it must be called once to initialise parameters u,c,cd,cm         #
-! #                                                                   #
-! #####################################################################
-implicit none
-
-common /mpidpd/ rank, nproc
-logical,save :: init
-data init /.true./
-integer,save :: ir,jr
-integer i,ii,j,jj,k,l,m,idnode
-real*8,save :: c,cd,cm,u(1:97)
-real*8 s,t
-integer*4 nproc,rank
-      
-
-! initialise parameters u,c,cd,cm
-if (init) then
-    init = .false.
-
-! initial values of i,j,k must be in range 1 to 178 (not all 1)
-! initial value of l must be in range 0 to 168
-    i = mod(rank,166) + 12
-    j = mod(rank,144) + 34
-    k = mod(rank,122) + 56
-    l = mod(rank,90)  + 78
-    ir = 97
-    jr = 33
-    do ii=1,97
-        s = 0.0d0
-        t = 0.5d0
-        do jj=1,24
-            m = mod(mod(i*j,179)*k,179)
-            i = j
-            j = k
-            k = m
-            l = mod(53*l+1,169)
-            if (mod(l*m,64)>=32) s = s+t
-            t = 0.5d0*t
-        end do
-        u(ii)=s
-    end do
-    c  =   362436.0d0/16777216.0d0
-    cd =  7654321.0d0/16777216.0d0
-    cm = 16777213.0d0/16777216.0d0
-end if
-
-! calculate random number
-uni=u(ir)-u(jr)
-if (uni < 0.0d0) uni = uni + 1.0d0
-u(ir)=uni
-ir=ir-1
-if (ir == 0) ir = 97
-jr=jr-1
-if (jr == 0) jr = 97
-c = c-cd
-if (c < 0.0d0) c = c+cm
-uni = uni-c
-if (uni < 0.0d0) uni = uni + 1.0d0
 
 end
 
@@ -1813,177 +1820,6 @@ end do
 
 end
 
-subroutine dpd2vtk()
-! #####################################################################
-! #                                                                   #
-! #   subroutine 12:                                                  #
-! #   output VTK files                                                #
-! #                                                                   #
-! #####################################################################
-implicit none
-save
-include "mpif.h"
-
-common /ptype/ kindp
-common /na/ natms,natmsfan
-common /cell/ dlx,dly,dlz,rcut,kpbc
-common /cella/ dlxa,dlya,dlza
-common /bxsize/ ilx,ily,ilz
-common /rxyz/ rx,ry,rz
-common /mpidpd/ rank, nproc
-common /den/ rho
-common /typel/ typelist,ntype
-common /top/ cln,nrow,ncol
-
-logical init/.true./
-integer*4 mw,i,j,k,ijk,m
-real*4 sw,rcut
-integer*4   iw(0:26), jw(0:26), kw(0:26)
-real*4      w(0:26)
-integer*4 b,kpbc
-integer*1 typelist(10),ntype,itype
-integer*4 natms,natmsfan
-integer*4 frame
-character*4 fname(10000)
-character*1 iat(10)
-character*1 number(10)
-integer*4 ni,nj
-real*4 dlx,dly,dlz
-real*4 dlxa,dlya,dlza
-integer*4 ilx,ily,ilz
-real*4 x0,y0,z0
-integer*4 ix,iy,iz
-integer*4 rank, nproc,cln,nrow,ncol
-real*4 di,d(int(dlxa))
-real*4 rho
-integer ierr
-
-integer*1,pointer :: kindp(:,:) 
-real*4,pointer :: rx(:,:),ry(:,:),rz(:,:) 
-
-integer*4   nt(int(dlxa),int(dlya),ilz), nta(int(dlxa),int(dlya),ilz)
-integer*4   ic(0:int(dlxa)+1), jc(0:int(dlya)+1), kc(0:ilz+1)
-data number / '0','1','2','3','4','5','6','7','8','9' /
-data iat/'1','2','3','4','5','6','7','8','9','0'/
-
-! set intial values   
-if ( init ) then
-    init = .false.
-    mw = 0
-    sw = 1.0
-    iw(0) = 0
-    jw(0) = 0
-    kw(0) = 0
-    w(0)  = 1.0
-
-    ! set weighting coefficients
-    do i = -1, 1
-        do j = -1, 1
-            do k = -1, 1
-                ijk = i*i + j*j + k*k
-                if ( ijk > 0 ) then
-                    mw = mw + 1
-                    iw(mw) = i
-                    jw(mw) = j
-                    kw(mw) = k
-                    if ( ijk == 1 ) w(mw) = 1.d0/( 1.+sqrt( 1. ) )
-                    if ( ijk == 2 ) w(mw) = 1.d0/( 1.+sqrt( 2. ) )
-                    if ( ijk == 3 ) w(mw) = 1.d0/( 1.+sqrt( 3. ) )
-                    sw = sw + w(mw)
-                end if
-            end do
-        end do
-    end do
-
-    !convert frame number to character
-    frame = 0
-    do i = 1, 10
-        do j = 1, 10
-            do k = 1, 10
-                do m=1, 10
-                    frame = frame + 1
-                    fname(frame) = number(i)//number(j)//number(k)//number(m)
-                end do
-            end do
-        end do
-    end do
-    frame = 0
-end if
-frame = frame + 1
-
-! exit program if there are too many frames
-if ( frame > 9999 ) call error(120)
-
-! create subcell map considering boundary conditions
-ni =  int( dlxa )
-nj =  int( dlya )
-do i = 0, ni + 1
-    ic(i) = mod( i, ni )
-    if ( ic(i) == 0 ) ic(i) = ni
-end do
-do j = 0, nj + 1
-    jc(j) = mod( j, nj )
-    if ( jc(j) == 0 ) jc(j) = nj
-end do
-do k = 0, ilz + 1
-    kc(k) = mod( k, ilz )
-    if ( kc(k) == 0 ) kc(k) = ilz
-end do
-
-! loop over all type of particles in the simulation cell
-do itype = 1, ntype
-    ijk = typelist(itype)
-    nt=0
-    nta=0
-
-    ! each node calculates the number of beads of chosen type in subcells
-    do i = 1, natms
-        if ( kindp(i,1) /= ijk ) cycle
-        x0 = rx(i,1)+dlx*(ncol-1)
-        y0 = ry(i,1)+dly*(nrow-1)
-        z0 = rz(i,1)
-        ix=min(int(x0),int(dlxa)-1)+1
-        iy=min(int(y0),int(dlya)-1)+1
-        iz=min(int(z0),ilz-1)+1
-        nt(ix,iy,iz) = nt(ix,iy,iz) + 1
-    end do
-
-    ! collect number of beads in all subcells on the node 0 
-    call MPI_REDUCE(nt, nta, ni*nj*ilz, mpi_integer, mpi_sum, 0, mpi_comm_world,ierr)
-
-    ! output vtk file considering weighting coefficients
-    if (rank==0) then
-        open(13, file = iat(typelist(itype))//'-'//fname(frame)//'.vtk',status='replace')
-        write( 13, '(a)' )      '# vtk DataFile Version 3.0'
-        write( 13, '(a)' )      'Uni-Ulm Simuation Group: rgba'
-        write( 13, '(a)' )      'ASCII'
-        write( 13, '(a)' )      'DATASET STRUCTURED_POINTS'
-        write( 13, '(a,3i4)' )  'DIMENSIONS', ni,nj,ilz
-        write( 13, '(a)' )      'ASPECT_RATIO 1 1 1'
-        write( 13, '(a)' )      'ORIGIN 0 0 0'
-        write( 13, '(a,i8)' )   'POINT_DATA', ni*nj*ilz
-        write( 13, '(a)' )      'SCALARS volume_scalars int 1'
-        write( 13, '(a)' )      'LOOKUP_TABLE default'
-        do k = 1, ilz
-            do j = 1, nj
-                do i = 1, ni
-                    di = 0.0
-
-                    ! calculate final subcell beads density considering contribution of neighbouring subcells
-                    do m = 0, 26
-                        di = di +nta(ic(i+iw(m)),jc(j+jw(m)),kc(k+kw(m)))*w(m)
-                    end do
-                    d(i) = di / sw / rho
-                end do
-                write(13,'(128i4)') ( int( 500*d(i) ), i = 1, ni )
-            end do
-        end do
-        close(13, status = 'keep')
-    end if
-end do
-
-end
-
 subroutine intv()     
 ! #################################################################
 ! #                                                               #
@@ -2016,166 +1852,6 @@ do i=1, natms
     vy(i) = vy(i) + dt2*fy(i)
     vz(i) = vz(i) + dt2*fz(i)
 end do
-
-end
-
-subroutine sqs()
-! #################################################################
-! #                                                               #
-! #    subroutine 14:                                             #
-! #    calculate static structure factor                          #
-! #                                                               #
-! #################################################################
-implicit none
-include 'mpif.h'
-save
-
-common /cella/ dlxa,dlya,dlza
-common /cell/ dlx,dly,dlz,rcut,kpbc
-common /na/ natms,natmsfan
-common /rxyz/ rx,ry,rz
-common /ptype/ kindp
-common /mpidpd/ rank, nproc
-common /top/ cln,nrow,ncol
-
-integer kmax,j,numvect,i,k,len,i2st,j2st,k2st,atom,counter,i2,j2,k2,i4,l
-parameter (kmax=33)
-parameter (numvect=2000)
-logical init /.true./
-real*4 twopi,sq(numvect,10)
-real*4 minvec1,minvec2,minvec3,rn1,rn2,rn3
-real*4 dlxa,dlya,dlza
-real*4 dlx,dly,dlz,rcut
-integer*4 kpbc
-real*4 rxb,ryb,rzb
-integer*4 natms,natmsfan
-integer*4 rank,nproc,cln,nrow,ncol
-integer num(numvect),nat(10),nata(10),ierr,kinda
-complex expsum(0:kmax,0:kmax,8,10),expsuma(0:kmax,0:kmax,8,10)
-complex ex,ey,ez,ex1,ey1,ez1
-real*4,pointer :: rx(:,:),ry(:,:),rz(:,:) 
-integer*1,pointer :: kindp(:,:) 
-
-! set intial values; zero arrays
-if (init) then
-    twopi = 8.0 * atan( 1.0 )
-    expsum=(0.0,0.0)
-    expsuma=(0.0,0.0)
-    do j=1,numvect
-        sq(j,1:10)=0.0
-        num(j)=0
-    end do
-
-    ! calculate number of beads of each type on each node
-    nat(1:10)=0
-    nata(1:10)=0
-    do i=1,natms
-        nat(kindp(i,1))=nat(kindp(i,1))+1
-    end do
-
-    ! collect total number of beads of each type
-    call mpi_Reduce(nat, nata, 10, MPI_integer, MPI_SUM, 0 , MPI_COMM_WORLD,ierr);
-    init=.false.
-end if
-
-! set basis vectors
-minvec1=1.0/dlxa
-minvec2=1.0/dlya
-minvec3=1.0/dlza
-
-! loop over all directions
-do i=0,kmax
-    do j=0,kmax
-        do k=0,kmax
-            
-            ! check if resulting scattering vector length is less than maximum length
-            len=sqrt(i*i*minvec1**2+j*j*minvec2**2+k*k*minvec3**2)*2000
-            if (len>0.and. len<2000) then
-                
-                ! calculate number of available directions of vector projections 
-                ! (if VP==0 then number of directions=1; otherwise it's=2) 
-                if (i>0) then;i2st=-1;else;i2st=1;end if
-                if (j>0) then;j2st=-1;else;j2st=1;end if
-                if (k>0) then;k2st=-1;else;k2st=1;end if
-                
-                ! calculate current vector length
-                rn1=minvec1*i
-                rn2=minvec2*j
-                rn3=minvec3*k
-
-                ! loop over all atoms on each node considering its space position
-                do atom=1,natms
-                    rxb=rx(atom,1)+dlx*(ncol-1)
-                    ryb=ry(atom,1)+dly*(nrow-1)
-                    rzb=rz(atom,1)
-                    kinda=kindp(atom,1)
-                    
-                    ! calculate parts of complex exponent
-                    ex=cos(twopi*rn1*rxb)+(0.0,1.0)*sin(twopi*rn1*rxb)
-                    ey=cos(twopi*rn2*ryb)+(0.0,1.0)*sin(twopi*rn2*ryb)
-                    ez=cos(twopi*rn3*rzb)+(0.0,1.0)*sin(twopi*rn3*rzb)
-                    ex1=ex
-                    ey1=ey
-                    ez1=ez
-                    
-                    ! calculate sum of exponents (at each node) considering available sqattering vector directions
-                    counter=1
-                    do i2=i2st,1,2
-                        do j2=j2st,1,2
-                            do k2=k2st,1,2
-
-                                ! increase sum of exponents for corresponding vector lengths along y and z
-                                expsum(j,k,counter,kinda)=ex1*ey1*ez1+expsum(j,k,counter,kinda) 
-                                counter=counter+1
-                                ez1=conjg(ez1)
-                            end do
-                            ey1=conjg(ey1)
-                        end do
-                        ex1=conjg(ex1)
-                    end do
-                end do
-            end if
-        end do
-    end do
-    
-    ! collect sums of exponents on node 0.  do this only when scattering vector length along x is changing (to minimize number of communications)
-    call mpi_Reduce(expsum, expsuma, (kmax+1)*(kmax+1)*8*10, MPI_complex, MPI_SUM, 0 , MPI_COMM_WORLD,ierr);
-    
-    ! add calculated sums of exponents to static structure factor (for current vector length along x and all vector lengths along y and z)
-    expsum=0
-    if (rank==0) then
-        do j=0,kmax
-            do k=0,kmax
-                len=sqrt(i*i*minvec1**2+j*j*minvec2**2+k*k*minvec3**2)*2000
-                if (len>0.and. len<2000) then
-                    counter=1
-                    if (i>0) counter=counter*2
-                    if (j>0) counter=counter*2
-                    if (k>0) counter=counter*2
-                    do i4=1,counter
-                        num(len)=num(len)+1
-                        do l=1,10
-                            if (nata(l)>0) sq(len,l)=sq(len,l)+conjg(expsuma(j,k,i4,l))*expsuma(j,k,i4,l)/nata(l)
-                        end do
-                    end do
-                end if   
-            end do
-        end do
-    end if   
-
-! go to the next vector length along x       
-end do
-
-! output results      
-if (rank==0) then
-    open(10, file = 'sq.dat', status = 'unknown')
-    do j=1,numvect
-        if (num(j)>0) then 
-            write(10,'(11f16.6,i10)')real(j)/2000,sq(j,1:10)/num(j),num(j)
-        end if
-    end do
-    close(10)
-end if
 
 end
 
@@ -3351,300 +3027,6 @@ end if
 
 end
 
-subroutine chem()
-! #################################################################
-! #                                                               #
-! #    subroutine 27:                                             #
-! #    chemical reactions                                         #
-! #                                                               #
-! #################################################################
-implicit none
-save
-include "mpif.h"
-
-common /bxsize/ ilx,ily,ilz
-common /cell/ dlx,dly,dlz,rcut,kpbc
-common /rst/ nbond,nangles
-common /ptype/ kindp 
-common /npall/ npall 
-common /bnd/ cn
-common /angl/ ca,angles
-common /sizes/ sz 
-common /mpidpd/ rank, nproc 
-common /correl/ corr,bcorr,bcorrt 
-common /ptypeall/ kindpall 
-common /top/ cln,nrow,ncol 
-common /chemmap/ nmap,arrtypemap
-common /probcb/ probc,probb 
-common /vale/ val 
-common /ch/ rchem 
-
-
-integer*1,pointer :: kindp(:,:) 
-integer*4,pointer :: cn(:,:) 
-integer*4,pointer :: corr(:,:),bcorr(:)
-integer*1,pointer :: bcorrt(:) 
-integer*1,pointer :: kindpall(:) 
-integer,pointer :: rcount(:),displ(:) 
-integer*4,pointer :: reacs(:), rcvb(:) 
-integer*4,pointer :: nmap(:,:,:,:,:) 
-integer*1,pointer :: arrtypemap(:,:,:,:) 
-integer*1,pointer :: val(:) 
-real*4,pointer :: probc(:,:),probb(:,:)
-integer*4,pointer :: ca(:,:) 
-integer*4,pointer :: angles(:)
-
-integer*4 rank,nproc,cln,nrow,ncol,rowd,cold,rowc,colc
-integer*4 nbond,nangles
-integer*4 sz
-integer*4 link(sz,3),lct(0:ilx+1,0:ily+1,ilz),qua(0:ilx+1,0:ily+1,ilz)
-real*4 dlx,dly,dlz,rcut
-integer*4 ilx,ily,ilz,kpbc,ntry
-real*4 rchem
-integer*4 i,j,k,npall,iter,iat,ix,iy,iz,klast,l,ic,jc,ineig,jx,jy,jz,iatm1,iatm2,nami,namj,vali,valj
-real*4 uni
-integer*4 reaclist(1000),nneib,reaclistc(1000),reaclistart(1000)
-real*4 distlist(1000),rij,rchem2
-integer*4 arrtype
-integer*4 reacssize,allnum
-integer ierr
-logical init /.true./
-logical change
-
-! sey some initial values
-if (init) then
-    rchem=rcut
-
-    ! allocate main chem arrays
-    allocate( rcount(nproc), displ(nproc),reacs(npall),rcvb(npall*2),nmap(3,27,ilx,ily,ilz),arrtypemap(27,ilx,ily,ilz))
-    
-    ! create map of subcells
-    call maps()
-    
-    rchem2=rchem**2
-
-    ! divide nodes into groups
-    cold=min0(3,cln)
-    rowd=min0(3,nproc/cln)
-    if (dlx>rchem*2) cold=min0(2,cln)
-    if (dly>rchem*2) rowd=min0(2,nproc/cln)
-
-    ! number of iterations at every choice of nodes group
-    ntry=real(npall*cold*rowd)/real(200*nproc)
-    init=.false.
-end if
-
-! create linked lists for all beads (for real and ghost)
-call links(link,qua,lct)
-
-! change groups of nodes
-do iter=1,200
-    reacssize=0 
-
-    ! choose nodes group at random
-    if (rank==0) then
-        rowc=int(uni()*rowd)
-        colc=int(uni()*cold)
-    end if
-    call MPI_Bcast ( rowc, 1, MPI_integer, 0,mpi_comm_world,ierr )
-    call MPI_Bcast ( colc, 1, MPI_integer, 0,mpi_comm_world,ierr ) 
-    
-    ! if the node belongs to the chosen group        
-    if (mod(nrow-1,rowd)==rowc.and.mod(ncol-1,cold)==colc) then
-    
-        ! choose ntry beads at random 
-        do iat=1,ntry
-            
-            ! choose a bead at random
-            ix=int(uni()*ilx)+1
-            iy=int(uni()*ily)+1
-            iz=int(uni()*ilz)+1
-            klast=qua(ix,iy,iz)
-            if (klast==0) cycle
-            k=int(uni()*klast)
-            i=lct(ix,iy,iz)
-            do l=1,k
-                i=link(i,1)
-            end do
-            ic=corr(i,1)
-            vali=val(ic)
-            
-            ! check if its valency is not equal to 0    
-            if (vali>0) then
-                nneib=0  
-
-                ! loop over all neighbouring subcells
-                do ineig=1,27
-                    jx=nmap(1,ineig,ix,iy,iz)
-                    jy=nmap(2,ineig,ix,iy,iz)
-                    jz=nmap(3,ineig,ix,iy,iz)
-                    arrtype=arrtypemap(ineig,ix,iy,iz)
-
-                    ! choose the first bead in the selected subcell
-                    j=lct(jx,jy,jz)
-
-                    ! loop over all beads in the selected subcell
-                    do while (j/=0)
-                        if ((i==j).and.(arrtype==1)) then
-                            j=link(j,arrtype)
-                            cycle
-                        end if
-                        
-                        ! check if the valency of j bead is not equal to 0
-                        jc=corr(j,arrtype)
-                        valj=val(jc)
-                        if (valj<1) then
-                            j=link(j,arrtype)
-                            cycle
-                        end if
-                        
-                        ! check distance between beads
-                        call distij(i,j,arrtype,rij)
-                        if (rij>=rchem2) then
-                            j=link(j,arrtype)
-                            cycle
-                        end if
-                        
-                        ! place j bead to the list of possible connections
-                        nneib=nneib+1
-                        reaclistc(nneib)=jc
-                        reaclist(nneib)=j
-                        reaclistart(nneib)=arrtype
-                        distlist(nneib)=rij
-                        j=link(j,arrtype)
-                    end do
-                end do
-                
-                ! sort possible connections list ascending
-                call sort(nneib,reaclist,reaclistc,reaclistart,distlist)
-                
-                ! loop over list of possible connections
-                do ineig=1,nneib
-                    if (vali<1) exit
-                    j=reaclist(ineig)
-                    arrtype=reaclistart(ineig)
-
-                    ! probability test
-                    if (abs(corr(i,1)-corr(j,arrtype))>1 .and. uni()<probc(kindp(i,1),kindp(j,arrtype))) then
-
-                        ! form a bond
-                        jc=reaclistc(ineig)
-                        cn(ic,0) = cn(ic,0)+1
-                        cn(ic,cn(ic,0)) = jc
-                        cn(jc,0) = cn(jc,0)+1
-                        cn(jc,cn(jc,0)) = ic
-                        val(ic)=val(ic)-1
-                        val(jc)=val(jc)-1
-                        vali=vali-1
-                        reacs(reacssize+1)=ic
-                        reacs(reacssize+2)=jc
-                        reacssize=reacssize+2
-                        nbond=nbond+1
-                    end if
-                end do
-            end if
-        end do
-    end if
-
-    ! gather number of bonds created on all nodes
-    call MPI_Allgather (reacssize, 1, MPI_integer, rcount, 1, MPI_integer, mpi_comm_world,ierr )
-    displ(1)=0
-    do i=2,nproc
-        displ(i)=displ(i-1)+rcount(i-1)
-    end do
-    allnum=displ(nproc)+rcount(nproc)    
-
-    ! receive information about all created bonds
-    call MPI_Allgatherv(reacs, reacssize,MPI_integer, rcvb, rcount, displ, MPI_integer, mpi_comm_world,ierr)
-
-    ! on each node create bonds (add them to the connection matrix) obtained from other nodes
-    do i=0,displ(rank+1)-1,2
-        ic=rcvb(i+1)
-        jc=rcvb(i+2)
-        cn(ic,0)=cn(ic,0)+1
-        cn(jc,0)=cn(jc,0)+1
-        cn(ic,cn(ic,0))=jc
-        cn(jc,cn(jc,0))=ic
-        val(ic)=val(ic)-1
-        val(jc)=val(jc)-1
-        nbond=nbond+1
-    end do
-    if (rank+1<nproc) then
-        do i=displ(rank+2),allnum-1,2
-            ic=rcvb(i+1)
-            jc=rcvb(i+2)
-            cn(ic,0)=cn(ic,0)+1
-            cn(jc,0)=cn(jc,0)+1
-            cn(ic,cn(ic,0))=jc
-            cn(jc,cn(jc,0))=ic
-            val(ic)=val(ic)-1
-            val(jc)=val(jc)-1
-            nbond=nbond+1
-        end do
-    end if    
-end do
-
-! bond breaking part
-! divide all beads among all nodes
-iatm1 = 1+(rank*npall)/nproc
-iatm2 =  ((rank+1)*npall)/nproc
-reacssize=0
-
-! loop over beads
-do iat=iatm1,iatm2
-    do i=1,cn(iat,0)
-        if(iat<cn(iat,i)) then
-            
-            ! angle bonds can't be broken
-            change=.false.
-            do j=1,ca(iat,0)
-                if(angles(ca(iat,j)*3-2)==cn(iat,i).or.angles(ca(iat,j)*3-1)==cn(iat,i).or.angles(ca(iat,j)*3)==cn(iat,i)) change=.true.
-            end do
-
-            ! probability test 
-            if (abs(cn(iat,i)-iat)>1 .and. uni()<probb(kindpall(iat),kindpall(cn(iat,i)))) then
-                if (change) cycle
-                reacs(reacssize+1)=iat
-                reacs(reacssize+2)=i
-                reacssize=reacssize+2
-            end if
-        end if  
-    end do
-end do
-
-! gather number of destroyed bonds
-call MPI_Allgather (reacssize, 1, MPI_integer, rcount, 1, MPI_integer, mpi_comm_world,ierr )
-displ(1)=0
-do i=2,nproc
-    displ(i)=displ(i-1)+rcount(i-1)
-end do
-allnum=displ(nproc)+rcount(nproc)    
-
-! gather all information about broken bonds
-call MPI_Allgatherv(reacs, reacssize,MPI_integer, rcvb, rcount, displ, MPI_integer, mpi_comm_world,ierr)
-
-! remove all broken bonds from the connection matrix
-do i=0,allnum-1,2
-    nbond=nbond-1
-    ic=rcvb(i+1)
-    k=rcvb(i+2)
-    jc=cn(ic,k)
-    val(ic)=val(ic)+1
-    val(jc)=val(jc)+1
-    cn(ic,k)=cn(ic,cn(ic,0))
-    cn(ic,0)=cn(ic,0)-1
-    do j = 1, cn(jc,0)
-        if (cn(jc,j)==ic)then
-            cn(jc,j) = cn(jc,cn(jc,0))
-            cn(jc,0) = cn(jc,0) - 1
-            exit
-        end if
-    end do
-end do
-
-end
-
-
 Subroutine distij(i,j,arrtype,rij)
 ! #################################################################
 ! #                                                               #
@@ -3715,202 +3097,7 @@ if (flag==1) go to 334
 
 end
 
-subroutine links(link,qua,lct)
-! #################################################################
-! #                                                               #
-! #    subroutine 30:                                             #
-! #    create linked lists for all beads                          #
-! #                                                               #
-! #################################################################  
-implicit none
-save
-
-common /cell/ dlx,dly,dlz,rcut,kpbc
-common /ch/ rchem 
-common /na/ natms,natmsfan
-common /nab/ natmsfanbond
-common /sizes/ sz
-common /bxsize/ ilx,ily,ilz 
-common /rxyz/ rx,ry,rz 
-
-real*4,pointer :: rx(:,:),ry(:,:),rz(:,:) 
-
-real*4 dlx,dly,dlz,rcut
-integer*4 sz
-integer*4 ilx,ily,ilz,kpbc
-real*4 rchem
-integer*4 link(sz,3),lct(0:ilx+1,0:ily+1,ilz),qua(0:ilx+1,0:ily+1,ilz)
-integer*4 natms,natmsfan,natmsfanbond
-integer*4 i,j,ix,iy,iz
-
-! zero arrays
-link=0
-qua=0
-lct=0
-
-! create linked list for real beads
-do i=1,natms
-    ix=min(int(rx(i,1)/rchem),ilx-1)+1
-    iy=min(int(ry(i,1)/rchem),ily-1)+1
-    iz=min(int(rz(i,1)/rchem),ilz-1)+1
-    j=lct(ix,iy,iz)
-    lct(ix,iy,iz)=i
-    link(i,1)=j
-    qua(ix,iy,iz)=qua(ix,iy,iz)+1
-end do
-
-! create linked list for ghost beads type 1(which was used to calculate forces)
-do i=1,natmsfan
-    if (rx(i,2)>=(dlx+rchem)) then
-        cycle
-    elseif (rx(i,2)<dlx) then
-        ix=min(int(rx(i,2)/rchem),ilx-1)+1
-    elseif (rx(i,2)<(dlx+rchem)) then
-        ix=ilx+1
-    end if
-    if (ry(i,2)>=(dly+rchem).or.ry(i,2)<=(-rchem)) then
-        cycle
-    elseif (ry(i,2)<0) then
-        iy=0  
-    elseif (ry(i,2)<dly) then
-        iy=min(int(ry(i,2)/rchem),ily-1)+1
-    elseif (ry(i,2)<(dly+rchem)) then
-        iy=ily+1
-    end if
-    iz=min(int(rz(i,2)/rchem),ilz-1)+1
-    j=lct(ix,iy,iz)
-    lct(ix,iy,iz)=i
-    link(i,2)=j
-    qua(ix,iy,iz)=qua(ix,iy,iz)+1
-end do
-
-! create linked list for ghost beads type 2(which was not used to calculate forces)
-do i=1,natmsfanbond
-    if (rx(i,3)<=-(rchem)) then
-        cycle
-    elseif (rx(i,3)<=0) then
-        ix=0
-    elseif (rx(i,3)<=dlx) then
-        ix=min(int(rx(i,3)/rchem),ilx-1)+1
-    end if
-    if (ry(i,3)>=(dly+rchem).or.ry(i,3)<=(-rchem)) then
-        cycle
-    elseif (ry(i,3)<=0) then
-        iy=0  
-    elseif (ry(i,3)<dly) then
-        iy=min(int(ry(i,3)/rchem),ily-1)+1
-    elseif (ry(i,3)<(dly+rchem)) then
-        iy=ily+1
-    end if
-    iz=min(int(rz(i,3)/rchem),ilz-1)+1
-    j=lct(ix,iy,iz)
-    lct(ix,iy,iz)=i
-    link(i,3)=j
-    qua(ix,iy,iz)=qua(ix,iy,iz)+1
-end do    
-
-end
-
-subroutine maps()
-! #################################################################
-! #                                                               #
-! #    subroutine 31:                                             #
-! #    create full map of cubcells neighbours                     #
-! #    (all 27 unlike fmaps)                                      #
-! #    for chem                                                   #
-! #                                                               #
-! #################################################################  
-implicit none
-
-common /bxsize/ ilx,ily,ilz
-common /chemmap/ nmap,arrtypemap
-
-integer*1,pointer :: arrtypemap(:,:,:,:)
-integer*4,pointer :: nmap(:,:,:,:,:)
-
-integer*4 ilx,ily,ilz
-integer*4 ix,iy,iz,jx,jy,jz,nei
-integer*4 nix,niy,niz
-dimension nix(27),niy(27),niz(27)
-data niz/0,1,0,0,-1,1, 0,-1,1,0,-1, 1,-1,1,-1, 0, 0, 1,-1, 0, 1,-1, 0, 1,-1, 1,-1/
-data niy/0,0,1,0, 1,1,-1, 0,0,1,-1,-1, 1,1, 0,-1, 0,-1,-1, 1, 0, 0,-1, 1, 1,-1,-1/
-data nix/0,0,0,1, 0,0, 1, 1,1,1, 1, 1, 1,1, 0, 0,-1, 0, 0,-1,-1,-1,-1,-1,-1,-1,-1/
-
-! loop over all subcells
-do ix=1,ilx
-    do iy=1,ily
-        do iz=1,ilz
-
-            ! loop over all possible neighbouring subcells
-            do nei=1,27
-                jx=ix+nix(nei)
-                jy=iy+niy(nei)
-                jz=iz+niz(nei)
-                
-                ! apply PBC
-                if(jz>ilz)then
-                    jz=1
-                elseif(jz<1)then
-                    jz=ilz
-                end if
-
-                ! update subcells map arrays
-                nmap(1,nei,ix,iy,iz)=jx
-                nmap(2,nei,ix,iy,iz)=jy
-                nmap(3,nei,ix,iy,iz)=jz
-
-                ! create map of ghost subcells type
-                if (jx>ilx) then
-                    arrtypemap(nei,ix,iy,iz)=2
-                elseif (jx<1) then
-                    arrtypemap(nei,ix,iy,iz)=3
-                elseif (jy>ily) then
-                    arrtypemap(nei,ix,iy,iz)=2
-                elseif (jy<1) then
-                    arrtypemap(nei,ix,iy,iz)=3
-                else
-                    arrtypemap(nei,ix,iy,iz)=1              
-                end if
-            end do
-        end do
-    end do
-end do
-
-end
-
-!subroutine rconf_reconstr(steps1,steps2,steps3,qstp,rst,rststp,vtk,vtkstp,sqf,sqfstp,chemstp,stepsdef,ndef,tau,tai,def_res)
-! #################################################################
-! #                                                               #
-! #    subroutine 32:                                             #
-! #    read input script                                          #
-! #                                                               #
-! ################################################################# 
-!implicit none
-
-!common /cella/ dlxa,dlya,dlza 
-!common /den/ rho 
-!common /data/ alpha,sigma,gamma
-!common /time/ dt
-!common /shwi/ shwi
-!common /probcb/ probc,probb
-!common /mpidpd/ rank, nproc 
-!common /bondf/ k_eq,k_bond 
-!common /anglef/ k_eqa,k_angle
-!common /bmult/ mult
-!common /defor/ nave 
-!common /lambd/ lambda
-
-!character*16,pointer :: fnames(:)
-!real*4,pointer :: conc(:)
-!real*4,pointer :: alpha(:,:),probc(:,:),probb(:,:)
-!integer*1,pointer :: anglestempl(:,:)
-!integer*1,pointer :: vallist(:),place(:)
-!character*2,pointer :: bead_type(:)
-!real*4,pointer :: k_eq(:,:),k_bond(:,:)
-!real*4,pointer :: k_eqa(:,:,:),k_angle(:,:,:)
-
-!end
-subroutine rconf(steps1,steps2,steps3,qstp,rst,rststp,vtk,vtkstp,sqf,sqfstp,chemstp,stepsdef,ndef,tau,tai,def_res)
+subroutine rconf(steps1,steps2,steps3,qstp,rst,rststp,stepsdef,ndef,tau,tai,def_res)
 ! #################################################################
 ! #                                                               #
 ! #    subroutine 32:                                             #
@@ -3924,7 +3111,6 @@ common /den/ rho
 common /data/ alpha,sigma,gamma
 common /time/ dt
 common /shwi/ shwi
-common /probcb/ probc,probb
 common /mpidpd/ rank, nproc 
 common /bondf/ k_eq,k_bond 
 common /anglef/ k_eqa,k_angle
@@ -3934,7 +3120,7 @@ common /lambd/ lambda
 
 character*16,pointer :: fnames(:)
 real*4,pointer :: conc(:)
-real*4,pointer :: alpha(:,:),probc(:,:),probb(:,:)
+real*4,pointer :: alpha(:,:)
 integer*1,pointer :: anglestempl(:,:)
 integer*1,pointer :: vallist(:),place(:)
 character*2,pointer :: bead_type(:)
@@ -3947,10 +3133,10 @@ character*2 el
 integer*4 i,j,k
 integer*1 rtype,snum,spnum,s1,s2,atempl
 real*4 dlxa,dlya,dlza,dt,sigma,gamma
-integer*4 chemstp, steps1,steps2,steps3,stepsdef
+integer*4 steps1,steps2,steps3,stepsdef
 real*4 alph,prob,probr
 real*4 rho,shwi
-integer*4 rst,vtk,sqf,qstp,vtkstp,sqfstp,rststp,nave,ndef
+integer*4 rst,qstp,rststp,nave,ndef
 real*4 tai,tau
 integer*4 rank,nproc,mult
 logical exists
@@ -3962,12 +3148,8 @@ real*4 sphrad
 
 ! set default values
 rst=0
-vtk=0
-sqf=0
-chemstp=200
 sigma=3.0
 shwi=1.0
-vtkstp=10000
 rststp=50000
 steps2=0
 steps1=0
@@ -4008,10 +3190,8 @@ end if
 atempl=0
 
 ! allocate all arrays
-allocate(k_eq(10,10),k_bond(10,10),alpha(10,10),probc(10,10),anglestempl(1000,3),vallist(10),probb(10,10),bead_type(10),k_eqa(10,10,10),k_angle(10,10,10))
+allocate(k_eq(10,10),k_bond(10,10),alpha(10,10),anglestempl(1000,3),vallist(10),bead_type(10),k_eqa(10,10,10),k_angle(10,10,10))
 vallist=0
-probc=0
-probb=0
 alpha=25.0
 k_eq=0.0
 k_eqa=180.0
@@ -4097,10 +3277,6 @@ do
         read (str(i+7:256),*,err=10,end=10) steps3
     end if
 
-    if (str(i:i+7)=='steps_ch') then
-        read (str(i+8:256),*,err=11,end=11) chemstp
-    end if
-
     if (str(i:i+9)=='pair_coeff') then
         read (str(i+10:256),*,err=12,end=12) s1,s2,alph
 
@@ -4126,14 +3302,6 @@ do
             alpha(s1,s2)=alph
             alpha(s2,s1)=alph
         end if
-    end if
-
-    if (str(i:i+9)=='chem_coeff') then
-        read (str(i+10:256),*,err=13,end=13) s1,s2,prob,probr
-        probc(s1,s2)=prob
-        probc(s2,s1)=prob
-        probb(s1,s2)=probr
-        probb(s2,s1)=probr
     end if
 
     if (str(i:i+len('dpd_density')-1)=='dpd_density') then
@@ -4201,21 +3369,9 @@ do
         read (str(i+len('deform'):256),*,err=20,end=20) stepsdef,ndef,tau,tai,nave
     end if
 
-    
-
-    if (str(i:i+len('sqf')-1)=='sqf') then
-        read (str(i+len('sqf'):256),*,err=22,end=22) sqfstp
-        sqf=1
-    end if
-
     if (str(i:i+len('restart')-1)=='restart') then
         read (str(i+len('restart'):256),*,err=23,end=23) rststp
         rst=1
-    end if
-
-    if (str(i:i+len('vtk')-1)=='vtk') then
-        read (str(i+len('vtk'):256),*,err=24,end=24) vtkstp
-        vtk=1
     end if
 
     if (str(i:i+len('bead_type')-1)=='bead_type') then
@@ -4263,7 +3419,6 @@ return
 10 call error(3212)    !   stop 'error:t1 error'
 11 call error(3213)    !   stop 'error:tch error'
 12 call error(3214)    !   stop 'error:alpha error'
-13 call error(3215)    !   stop 'error:probc error'
 14 call error(3216)    !   stop 'there is no dpdconf.dat file! '
 15 call error(3217)    !   stop 'error:density error!'
 16 call error(3218)    !   stop 'output_freq error'
@@ -4272,9 +3427,7 @@ return
 19 call error(3221)    !   stop 'val error'
 20 call error(3222)    !   stop 'deform error'
 21 call error(3223)    !   stop 'place error'
-22 call error(3224)    !   stop 'sqf error'
 23 call error(3225)    !   stop 'restart error'
-24 call error(3226)    !   stop 'vtk error'
 25 call error(3227)    !   stop 'bead_type error'
 26 call error(3228)    !   stop 'shwi error'
 27 call error(3229)    !   stop 'shwi error'
@@ -4719,11 +3872,6 @@ end if
 if( flag==61) then
     stop  'error 61:a bead has too high speed along Y'
 end if
-if( flag==120) then
-    call barrier
-    if(rank==0) stop 'error 120:too many VTK frames to output'
-    stop
-end if
 if( flag==150) then
     call barrier
     if(rank==0)stop 'error 150:domain size along X is less than Rcut'
@@ -4804,9 +3952,6 @@ end if
 if( flag==3214) then
     stop 'error 3214: input script error, pair_coeff command error'
 end if
-if( flag==3215) then
-    stop 'error 3215: input script error, chem_coeff command error'
-end if
 if( flag==3216) then
     stop 'error 3216: input script error, there is no dpdconf.dat file'
 end if
@@ -4834,14 +3979,8 @@ end if
 if( flag==3223) then
     stop 'error 3223: input script error, place command error'
 end if
-if( flag==3224) then
-    stop 'error 3224: input script error, sqf command error'
-end if
 if( flag==3225) then
     stop 'error 3225: input script error, restart command error'
-end if
-if( flag==3226) then
-    stop 'error 3226: input script error, vtk command error'
 end if
 if( flag==3227) then
     stop 'error 3227: input script error, bead_type command error'
