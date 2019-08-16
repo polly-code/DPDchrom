@@ -516,12 +516,45 @@ do
         iter=iter+1    
 end do
 close(14, status = 'keep')
+allocate(cn(nat,0:0),cn2(nat,0:0)) 
+cn=0
+cn2=0
+do i = 1, iter-1
+    cn2(contacts(i,1),0)=cn2(contacts(i,1),0)+1
+    cn2(contacts(i,2),0)=cn2(contacts(i,2),0)+1
+end do
+nbmax=maxval(cn(:,0))
+nbmax2=maxval(cn2(:,0))
+nullify (cn,cn2)
+allocate (cn(nat,0:nbmax),cn2(nat,0:nbmax2))
+
+! constuct connection matrixes for 2 types of bonds: for all bonds and only for double bonds
+cn=0
+cn2=0
+do i = 1, iter-1
+    i1=b1contacts(i,1)
+    i2=b2contacts(i,2)
+    if(bt(i)==2) then
+      cn(i1,0) = cn(i1,0) + 1
+      cn(i1,cn(i1,0)) = i2
+      cn(i2,0) = cn(i2,0) + 1
+      cn(i2,cn(i2,0)) = i1
+    end if
+    cn2(i1,0) = cn2(i1,0) + 1
+    cn2(i1,cn2(i1,0)) = i2
+    cn2(i2,0) = cn2(i2,0) + 1
+    cn2(i2,cn2(i2,0)) = i1
+end do
+dlxa
 !calculate dlxa dlyz dlza and matrix of connectivity
 do i=1,numberOfChr
-    call rndplace( arrLengthsOfChains(i),rxt,ryt,rzt,cn2,dlxa,dlya,dlza, 4 )
+    allocate(rxt(arrLengthsOfChains(i)),ryt(arrLengthsOfChains(i)),rzt(arrLengthsOfChains(i)))
+    call rndplace( arrLengthsOfChains(i),rxt,ryt,rzt,cn2,dlxa/2-1,dlya/2-1,dlza/2-1, 4 )
     rndposx = 0
     rndposy = 0
     rndposz = 0
+    do j=1,arrLengthsOfChains(i)
+        kindpt(sum(arrLengthsOfChains(1,i)+j))=1
 end do
 
 end
