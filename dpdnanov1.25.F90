@@ -486,7 +486,7 @@ integer*4 numberOfChr, iter
 integer*4 zero, one, two
 integer*4 i,j, i1, i2,nbmax2,natmsall,nbondsall
 integer*4 totalNumberOfSolvent,totalNumberOfChainBeads
-integer*4 globalPos1, globalPos2, reason, iter2
+integer*4 globalPos1, globalPos2, reason, iter2, empt_var
 real*4 dlxa,dlya,dlza, rho
 real*4 rndposx, rndposy, rndposz
 real*4 uni
@@ -502,6 +502,7 @@ data skip_1st_line/.true./
 zero=0
 one=1
 two=2
+rho=3.0
 numberOfChr=0
 nlines=-1 !first line is a header
 chrName='empty'
@@ -520,7 +521,6 @@ do
     else if (reason<0) then !end of file
         exit
     end if
-
 
     do i=1,100
         if ((.not. firstFlag) .and. (chrName(i)=='empty')) then
@@ -579,7 +579,8 @@ write(*,*) 'Iterators:',iter, iter2
 skip_1st_line=.true.
 iter2=iter-1
 allocate(preset(numberOfChr))
-preset(1)=arrLengthsOfChains(1)
+
+preset(1)=0
 do i=2,numberOfChr
     preset(i)=sum(arrLengthsOfChains(1: i-1))
 end do
@@ -599,8 +600,8 @@ do
     !write(*,*) 'chr1 ',chr1,'chr2 ',chr2,'pos1 ',pos1,'pos2 ',pos2,'strand1 ',strand1,'strand2 ',strand2
     firstFlag=.true.
     do i=1,numberOfChr
-        if (chr1==chrName(i)) globalPos1=preset(i)+ceiling(real(pos1-minChrLength(i))/real(resolution))
-        if (chr2==chrName(i)) globalPos2=preset(i)+ceiling(real(pos2-minChrLength(i))/real(resolution))
+        if (chr1==chrName(i)) globalPos1=preset(i)+ceiling(real(pos1-minChrLength(i)+1)/real(resolution))
+        if (chr2==chrName(i)) globalPos2=preset(i)+ceiling(real(pos2-minChrLength(i)+1)/real(resolution))
     end do
     if (abs(globalPos1-globalPos2)>1) then
         do j=iter2,iter
@@ -618,10 +619,8 @@ do
     end if
 end do
 close(14, status = 'keep')
-write(*,*) 'Again, iterators:',iter, iter2
-write(*,*) 'Example of contacts:',contacts(1,1), contacts(1,2)
 !calculate the size of simulation box
-dlxa=(totalNumberOfChainBeads/3.)**(1./3.)*2+1
+dlxa=((totalNumberOfChainBeads/3.)**(1./3.))*2+1
 dlya=dlxa
 dlza=dlxa
 natmsall=dlxa**3*rho
@@ -631,14 +630,12 @@ allocate(cn2(natmsall,0:0))
 cn2=0
 nbondsall=iter-1
 do i = 1, nbondsall
-    write(*,*) 'Contacts:',contacts(i,1), contacts(i,2)
+
     cn2(contacts(i,1),0)=cn2(contacts(i,1),0)+1
     cn2(contacts(i,2),0)=cn2(contacts(i,2),0)+1
-    if (mod(i,1000)==0) write(*,*) 'Contact number',i
 end do
 
 nbmax2=maxval(cn2(:,0))
-write(*,*) 'zero and maxval', nbmax2
 nullify (cn2)
 allocate (cn2(natmsall,0:nbmax2))
 
@@ -652,22 +649,23 @@ do i = 1, nbondsall
     cn2(i2,0) = cn2(i2,0) + 1
     cn2(i2,cn2(i2,0)) = i1
 end do
-
+write(*,*) 'start to write restart, atoms, bonds:', natmsall, nbondsall
 !write the data to restart file
 open(3, file = 'restart.dat',status='replace' )
 write(3,'(i8,f8.4)') natmsall, rho
 write(3,'(3f20.12)') dlxa,dlya,dlza
 
 iter=1
-allocate(rxt(natmsall),ryt(natmsall),rzt(natmsall))
+
 do i=1,numberOfChr
-    
-    call rndplace( arrLengthsOfChains(i),rxt,ryt,rzt,cn2,dlxa/2-1,dlya/2-1,dlza/2-1, 4 )
+    allocate(rxt(arrLengthsOfChains(i)),ryt(arrLengthsOfChains(i)),rzt(arrLengthsOfChains(i)))
+    write(*,*) 'number of chr', i
+    call rndplace( arrLengthsOfChains(i),rxt,ryt,rzt,cn2,dlxa/2-1,dlya/2-1,dlza/2-1, 2 )
     rndposx = 0
     rndposy = 0
     rndposz = 0
     do j=1,arrLengthsOfChains(i)
-        write(1,'(i8,2i4,3f14.6)')iter, zero, one, rxt(j), ryt(j), rzt(j)
+        write(3,'(i8,2i4,3f14.6)')iter, zero, one, rxt(j), ryt(j), rzt(j)
         iter=iter+1
     end do
     nullify(rxt,ryt,rzt)
@@ -676,7 +674,7 @@ do i=1,totalNumberOfSolvent
     rndposx=dlxa*uni()
     rndposy=dlya*uni()
     rndposz=dlza*uni()
-    write(1,'(i8,2i4,3f14.6)')iter, zero, two, rndposx, rndposy, rndposz
+    write(3,'(i8,2i4,3f14.6)')iter, zero, two, rndposx, rndposy, rndposz
     iter=iter+1
 end do
 
@@ -3863,15 +3861,6 @@ do i = 1, nat
         if ( r==0.0 ) then
 		r = 1.0
 		end if
-		if (place==4) then
-        scale = 0.5 / r
-        dx = dx * scale
-        dy = dy * scale
-        dz = dz * scale
-        rxt(j)=rxt(i)+dx
-        ryt(j)=ryt(i)+dy
-        rzt(j)=rzt(i)+dz
-		else
 		scale = 1.0 / r
         dx = dx * scale
         dy = dy * scale
@@ -3879,7 +3868,6 @@ do i = 1, nat
         rxt(j)=rxt(i)+dx
         ryt(j)=ryt(i)+dy
         rzt(j)=rzt(i)+dz
-		end if
 		!write(*,*) dx, dy, dz, scale, r, place
         id(j) = -1
     end do
