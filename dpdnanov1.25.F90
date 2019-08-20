@@ -447,8 +447,6 @@ if (num_of_args .ne. 2) stop 'Number of arguments not equals 2! The first one is
 CALL GETARG (1,geo_file)
 CALL GETARG (2,resstr)
 read(resstr,'(i)') resolution
-!write(resstr, '(i10)') resolution
-!write(*,*) 'filename is ',geo_file,'resolution is',resolution
 
 end
 
@@ -475,8 +473,8 @@ common /den/ rho
 !common /lambd/ lambda
 
 integer*8 :: maxChrLength(100), minChrLength(100)
-integer*4,pointer :: contacts(:,:)
-integer*4,pointer :: cn(:,:),cn2(:,:)
+integer*4,pointer :: contacts(:,:), preset(:)
+integer*4,pointer :: cn2(:,:)
 integer*4, pointer :: arrLengthsOfChains(:)
 real*4,pointer :: rxt(:),ryt(:),rzt(:)
 character*32 :: chrName(100)
@@ -486,7 +484,7 @@ integer*8 pos1,pos2
 integer*4 nlines
 integer*4 numberOfChr, iter
 integer*4 zero, one, two
-integer*4 i,j, i1, i2,nbmax2,natmsall,nbondsall,nbmax
+integer*4 i,j, i1, i2,nbmax2,natmsall,nbondsall
 integer*4 totalNumberOfSolvent,totalNumberOfChainBeads
 integer*4 globalPos1, globalPos2, reason, iter2
 real*4 dlxa,dlya,dlza, rho
@@ -520,7 +518,6 @@ do
     if (reason>0) then
         stop 'something wrong with the file geo'
     else if (reason<0) then !end of file
-        write(*,*) 'end of file geo'
         exit
     end if
 
@@ -567,18 +564,26 @@ allocate(contacts(totalNumberOfChainBeads**2,2))
 contacts=0
 iter=1
 iter2=1
-!rewrite it, there is a mistake!!!!!!
+
 do i=1,numberOfChr
+write(*,*)'Length of chromosome',i,arrLengthsOfChains(i)
     do j=1,arrLengthsOfChains(i)-1
-        if(.not. any(arrLengthsOfChains==i)) then
-            contacts(iter,1)=iter2
-            contacts(iter,2)=iter2+1
-            iter=iter+1
-        end if
+        contacts(iter,1)=iter2
+        contacts(iter,2)=iter2+1
+        iter=iter+1
         iter2=iter2+1
+        if (j==arrLengthsOfChains(i)-1) iter2=iter2+1
     end do
 end do
+write(*,*) 'Iterators:',iter, iter2
 skip_1st_line=.true.
+iter2=iter-1
+allocate(preset(numberOfChr))
+preset(1)=arrLengthsOfChains(1)
+do i=2,numberOfChr
+    preset(i)=sum(arrLengthsOfChains(1: i-1))
+end do
+
 do
     if (skip_1st_line) then
         skip_1st_line=.false.
@@ -589,18 +594,17 @@ do
     if (reason>0) then
         stop 'something wrong with the file geo'
     else if (reason<0) then !end of file
-        write(*,*) 'second end of file geo'
         exit
     end if
     !write(*,*) 'chr1 ',chr1,'chr2 ',chr2,'pos1 ',pos1,'pos2 ',pos2,'strand1 ',strand1,'strand2 ',strand2
     firstFlag=.true.
     do i=1,numberOfChr
-        if (chr1==chrName(i)) globalPos1=sum(arrLengthsOfChains(1: i-1))+ceiling(real(pos1-minChrLength(i))/real(resolution))
-        if (chr2==chrName(i)) globalPos2=sum(arrLengthsOfChains(1: i-1))+ceiling(real(pos2-minChrLength(i))/real(resolution))
+        if (chr1==chrName(i)) globalPos1=preset(i)+ceiling(real(pos1-minChrLength(i))/real(resolution))
+        if (chr2==chrName(i)) globalPos2=preset(i)+ceiling(real(pos2-minChrLength(i))/real(resolution))
     end do
     if (abs(globalPos1-globalPos2)>1) then
-        do j=1,iter
-            if ((contacts(iter,1)==globalPos1 .and. contacts(iter,2)==globalPos2).or.(contacts(iter,1)==globalPos2 .and. contacts(iter,2)==globalPos1)) then
+        do j=iter2,iter
+            if ((contacts(j,1)==globalPos1 .and. contacts(j,2)==globalPos2).or.(contacts(j,1)==globalPos2 .and. contacts(j,2)==globalPos1)) then
                 firstFlag=.false.
                 exit
             end if
@@ -610,10 +614,12 @@ do
             contacts(iter,2)=globalPos2
             iter=iter+1
         end if
+        firstFlag=.true.
     end if
 end do
 close(14, status = 'keep')
-
+write(*,*) 'Again, iterators:',iter, iter2
+write(*,*) 'Example of contacts:',contacts(1,1), contacts(1,2)
 !calculate the size of simulation box
 dlxa=(totalNumberOfChainBeads/3.)**(1./3.)*2+1
 dlya=dlxa
@@ -621,21 +627,22 @@ dlza=dlxa
 natmsall=dlxa**3*rho
 totalNumberOfSolvent=natmsall-totalNumberOfChainBeads
 
-allocate(cn(natmsall,0:0),cn2(natmsall,0:0)) 
-cn=0
+allocate(cn2(natmsall,0:0)) 
 cn2=0
 nbondsall=iter-1
 do i = 1, nbondsall
+    write(*,*) 'Contacts:',contacts(i,1), contacts(i,2)
     cn2(contacts(i,1),0)=cn2(contacts(i,1),0)+1
     cn2(contacts(i,2),0)=cn2(contacts(i,2),0)+1
+    if (mod(i,1000)==0) write(*,*) 'Contact number',i
 end do
-nbmax=maxval(cn(:,0))
+
 nbmax2=maxval(cn2(:,0))
-nullify (cn,cn2)
-allocate (cn(natmsall,0:nbmax),cn2(natmsall,0:nbmax2))
+write(*,*) 'zero and maxval', nbmax2
+nullify (cn2)
+allocate (cn2(natmsall,0:nbmax2))
 
 ! constuct connection matrices for all bonds
-cn=0
 cn2=0
 do i = 1, nbondsall
     i1=contacts(i,1)
