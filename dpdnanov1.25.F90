@@ -575,7 +575,7 @@ write(*,*)'Length of chromosome',i,arrLengthsOfChains(i)
         if (j==arrLengthsOfChains(i)-1) iter2=iter2+1
     end do
 end do
-write(*,*) 'Iterators:',iter, iter2
+
 skip_1st_line=.true.
 iter2=iter-1
 allocate(preset(numberOfChr))
@@ -597,7 +597,6 @@ do
     else if (reason<0) then !end of file
         exit
     end if
-    !write(*,*) 'chr1 ',chr1,'chr2 ',chr2,'pos1 ',pos1,'pos2 ',pos2,'strand1 ',strand1,'strand2 ',strand2
     firstFlag=.true.
     do i=1,numberOfChr
         if (chr1==chrName(i)) globalPos1=preset(i)+ceiling(real(pos1-minChrLength(i)+1)/real(resolution))
@@ -2008,6 +2007,7 @@ ntype=0
 typelist=0
 
 ! read information about beads
+! add fix: type 1 - chain, boxsize = dlxa/2-1; type 2 - solvent, boxsize = dlxa
 do i = 1, npall
     read(1,'(i8,2i4,3f14.6)', err=10, end=10)corrb,valb,kindpb,rxb,ryb,rzb
 
@@ -3840,7 +3840,7 @@ do i = 1, nat
 end do
 
 ! correct initial coordinates considering connection matrix
-do i = 1, nat
+do i = 1, nat-1
 
     ! exit if the bead has no bonds
     if ( cn(i,0) == 0 ) then
@@ -3849,8 +3849,9 @@ do i = 1, nat
     end if
 
     ! place all connected to the ith bead beads next to it
-    do k = 1, cn(i,0)
-        j = cn(i,k)
+    !do k = 1, 2!cn(i,0)
+
+        j = i+1
 
         ! don't move jth bead if it has already been moved 
         if (id(j)==-1) cycle
@@ -3870,7 +3871,7 @@ do i = 1, nat
         rzt(j)=rzt(i)+dz
 		!write(*,*) dx, dy, dz, scale, r, place
         id(j) = -1
-    end do
+    !end do
 end do
 
 end
