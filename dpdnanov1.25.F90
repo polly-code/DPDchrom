@@ -16,7 +16,6 @@ common /shwi/ shwi !transfer radius for "ghost" atoms
 common /correl/ corr,bcorr,bcorrt !arrays that store global atom numbers. corr converts atom number on the node to the global number, bcorr does the opposite, bcorrt shows atom state ("real,"ghost" or on the other node)
 common /den/ rho !density 
 common /bondf/ k_eq,k_bond !bond parameters - eq.length, stiffness
-common /anglef/ k_eqa,k_angle !angle parameters - eq.value, energy coefficient
 common /fname/ msi !name of input file
 common /mpidpd/ rank, nproc ! node number and total number of nodes
 common /rxyz/ rx,ry,rz !coordinates
@@ -28,15 +27,13 @@ common /sndrcv/ sndr,sndl,fanl,fanr,rcv,rcvf !communication arrays. sndr,sndl - 
 common /funnumb/ npl,fann !npl - number of "ghost" atoms than have been sent to left node, fann - numbers of these particles. necessary for receiving forces actiong on atoms close to the node boundary from left node
 common /commf/ fsend,rcou !array that stores forces to be sent to the right node (see above); rcou - detailed number of ghost particles
 common /bnd/ cn !main bond array
-common /rst/ nbond,nangles !number of bonds,number of angles
+common /rst/ nbond !number of bonds
 common /typel/ typelist,ntype !type of the atoms that present in the system and number of such types
 common /ptypeall/ kindpall !particle types
 common /top/ cln,nrow,ncol ! number of nodes in 1 row,row and column number of node
-common /angl/ ca,angles ! main angle arrays
 common /prs/ press ! pressure
 common /vale/ val !valencies
 common /bmult/ mult !angles/bond snd rcv arrays size multiplier
-common /defor/ nave ! number of interations to average stress-strain curve
 common /lambd/ lambda
 common /bio_input/ resolution, geo_file, contacts ! input parameters
 
@@ -53,20 +50,17 @@ integer*4,pointer :: contacts(:,:) !size nbnd,2
 real*4,pointer :: fsend(:) ! size 3*fsz/2
 integer*4,pointer :: cn(:,:) !size npall,0:maximum number of bonds
 integer*1,pointer :: kindpall(:) ! size npall
-integer*4,pointer :: ca(:,:) !size npall, 0: maximum number of angles
-integer*4,pointer :: angles(:) !size 3*nangles
 integer*1,pointer :: val(:) !size npall
 real*4,pointer :: alpha(:,:) !size 10,10
 real*4,pointer :: k_eq(:,:),k_bond(:,:) !size 10,10
-real*4,pointer :: k_eqa(:,:,:),k_angle(:,:,:) !size 10,10,10
 
-integer*4 nbond,nangles
+integer*4 nbond
 integer*4 rank,nproc,cln,nrow,ncol
 real*4 uni
 integer*4 sz,ssz,fsz,npall
 integer*4 ilx,ily,ilz
 integer ierr
-integer*4 steps1,steps2,steps3,qstp,rststp,nstp,stepsdef,ndef,nave
+integer*4 steps1,steps2,qstp,nstp
 integer*4 kpbc,rst
 real*4 dlx,dly,dlz,rcut,dlxtar
 real*4 dlxa,dlya,dlza
@@ -80,9 +74,8 @@ real*4 vall(3),vl(1)
 real*8 start
 integer*1 typelist(10),ntype
 integer*4 i,j,curdef
-real*4 press(3),tau,tai
+real*4 press(3)
 real*4 lambda
-integer*1 def_res
 integer*8 resolution
 character*256 geo_file
 
@@ -94,15 +87,12 @@ call mpi_comm_size(mpi_comm_world,nproc,ierr)
 ! randon number generator initialization
 vl=uni()
 call read_from_command_line()
-if (rank==0) then
-    write(*,*) geo_file, resolution
-    call read_geo()
-end if
-call barrier
-stop 'check the restart file'
-! read input script
-call rconf(steps1,steps2,steps3,qstp,rst,rststp,stepsdef,ndef,tau,tai,def_res)
 
+call barrier
+
+! read input script
+!call rconf(steps1,steps2,steps3,qstp,rst,rststp,stepsdef,ndef,tau,tai,def_res)
+call rconf(steps1,steps2,qstp)
 ! read restart.dat file
 call readrst()
 
@@ -137,8 +127,6 @@ if(rank==0) then
     write(*,*) 'Timestep                     :',dt
     write(*,*) 'Number of steps in 1st stage :',steps1
     write(*,*) 'Number of steps in 2nd stage :',steps2
-    write(*,*) 'Number of steps in 3rd stage :',steps3
-    write(*,*) 'Number of steps to deform    :',stepsdef
     write(*,*)
     write(*,*) 'DPD Parameters'
     write(*,*) 'Sigma                        :',sigma
@@ -156,13 +144,13 @@ end if
 fsend=0
 call forces()
 call forcesbond()
-call forcesangle()
 if (rank==0) start=mpi_wtime()
 
 ! start 1st stage with soft potentials
 alpha=alpha/5.0
 k_bond=k_bond/5.0
-do nstp=1,steps1
+dt=0.0001 !timestep for equilibration
+do nstp=1,steps1 ! stage 1 - equilibration 
     
     ! integrate beads positions and velocities
     call intr()
@@ -170,7 +158,6 @@ do nstp=1,steps1
     ! calculate forces
     call forces()
     call forcesbond()
-    call forcesangle()
 
     ! integrate beads velocoties
     call intv()
@@ -190,22 +177,16 @@ do nstp=1,steps1
     
     ! control  CM velocily
     if (mod(nstp,100)==0) call vcontrol()
-
-    ! output restart file
-    if (mod(nstp,rststp)==0.and.rst==1) call writerst()
 end do
 
 ! finish 1st pahse
 alpha=alpha*5.0
 k_bond=k_bond*5.0
-
+dt=0.04
 ! output time
 if (rank==0) write(*,*) 'stage 1 took',mpi_wtime()-start,'s'
 
-! output restart file
-if (rst==1) call writerst()
-
-! start 2nd stage - chem stage
+! start 2nd stage - calculation
 if (rank==0) start=mpi_wtime()
 do nstp=1,steps2
 
@@ -215,7 +196,6 @@ do nstp=1,steps2
     ! calculate forces
     call forces()
     call forcesbond()
-    call forcesangle()
 
     ! integrate beads velocoties
     call intv()
@@ -236,9 +216,6 @@ do nstp=1,steps2
 
     ! control  CM velocily
     if (mod(nstp,100)==0) call vcontrol()
-
-    ! output restart file
-    if (mod(nstp,rststp)==0.and.rst==1) call writerst()
 end do
 
 ! finish 2nd stage 
@@ -246,108 +223,7 @@ end do
 if (rank==0) write(*,*) 'stage 2 took',mpi_wtime()-start,'s'
 
 ! output restart file
-if (rst==1) call writerst()
-
-! start 3rd stage - equilibration
-if (rank==0) start=mpi_wtime()
-do nstp=1,steps3
-
-    ! integrate beads positions and velocities
-    call intr()
-
-    ! calculate forces
-    call forces()
-    call forcesbond()
-    call forcesangle()
-
-    ! integrate beads velocoties
-    call intv()
-
-    ! control output
-    if (mod(nstp,qstp)==0) then
-        vl=(sum(vz*vz)+sum(vy*vy)+sum(vx*vx))
-        vl=vl/natms/3
-        call gsum(vl,1)
-        vl=vl/nproc
-        vall(1)=sum(vx)
-        vall(2)=sum(vy)
-        vall(3)=sum(vz)
-        call gsum(vall,3)
-        call pressure()
-        if (rank==0) write(*,*)'stage 3', nstp,vl,maxval(abs(vall)),sum(press)/3.0
-    end if
-
-    ! control  CM velocily
-    if (mod(nstp,100)==0) call vcontrol()
-
-    ! output restart file
-    if (mod(nstp,rststp)==0.and.rst==1) call writerst()
-end do
-
-! finish 3rd stage 
-! output time
-if (rank==0) write(*,*) 'stage 3 took',mpi_wtime()-start,'s'
-
-! output restart file
-if (rst==1) call writerst()
-
-! start deformation
-if (rank==0) start=mpi_wtime()
-dlxtar=dlxa+def_res*tau
-
-! loop over number of deformed states
-do curdef=0,ndef
-    do nstp=1,stepsdef
-        
-        ! integrate beads positions and velocities
-        call intr()
-
-        ! calculate forces
-        call forces()
-        call forcesbond()
-        call forcesangle()
-
-        ! integrate velocities
-        call intv()
-
-        ! perform system affine deformation
-        if(tau>0.and.dlxa<dlxtar.and.mod(nstp,100)==0) call deform(tau,tai)
-        if(tau<0.and.dlxa>dlxtar.and.mod(nstp,100)==0) call deform(tau,tai)
-        ! control output
-        if (mod(nstp,qstp)==0) then
-            vl=(sum(vz*vz)+sum(vy*vy)+sum(vx*vx))
-            vl=vl/natms/3
-            call gsum(vl,1)
-            vl=vl/nproc
-            vall(1)=sum(vx)
-            vall(2)=sum(vy)
-            vall(3)=sum(vz)
-            call gsum(vall,3)
-            call pressure()
-            if(rank==0.and.nstp>(stepsdef-nave*qstp))call pressout(0)
-            if (rank==0) write(*,*)'stage def', nstp,vl,maxval(abs(vall)),press(1)
-        end if
-
-        ! control  CM velocily
-        if (mod(nstp,100)==0) call vcontrol()
-
-        ! output restart file
-        if (mod(nstp,rststp)==0.and.rst==1) call writerst()
-
-    end do
-
-    ! output Stress-Strain curve
-    if(rank==0)call pressout(1)
-
-    ! output restart file
-    if (rst==1) call writerst()
-
-    ! move to the next deformation degree
-    dlxtar=dlxtar+tau
-end do
-
-! output time
-if (rank==0) write(*,*) 'stage def took',mpi_wtime()-start,'s'
+call writerst()
 
 ! delete arrays
 call barrier
@@ -462,15 +338,6 @@ save
 common /bio_input/ resolution, geo_file, contacts ! input parameters
 common /cella/ dlxa,dlya,dlza
 common /den/ rho
-!common /data/ alpha,sigma,gamma
-!common /time/ dt
-!common /shwi/ shwi
-!common /mpidpd/ rank, nproc 
-!common /bondf/ k_eq,k_bond 
-!common /anglef/ k_eqa,k_angle
-!common /bmult/ mult
-!common /defor/ nave 
-!common /lambd/ lambda
 
 integer*8 :: maxChrLength(100), minChrLength(100)
 integer*4,pointer :: contacts(:,:), preset(:)
@@ -659,7 +526,7 @@ iter=1
 do i=1,numberOfChr
     allocate(rxt(arrLengthsOfChains(i)),ryt(arrLengthsOfChains(i)),rzt(arrLengthsOfChains(i)))
     write(*,*) 'number of chr', i
-    call rndplace( arrLengthsOfChains(i),rxt,ryt,rzt,cn2,dlxa/2-1,dlya/2-1,dlza/2-1, 2 )
+    call rndplace( arrLengthsOfChains(i),rxt,ryt,rzt,cn2,dlxa,dlya,dlza, 2 )
     rndposx = 0
     rndposy = 0
     rndposz = 0
@@ -682,7 +549,7 @@ write(3,'(a9,i9)') ' bonds:  ',nbondsall
 do i=1,nbondsall
     write(3,'(2i8)') contacts(i,1), contacts(i,2)
 end do
-write(3,'(a9,i9)') ' angles:  ',zero
+!write(3,'(a9,i9)') ' angles:  ',zero
 close(3)
 end
 
@@ -1909,11 +1776,10 @@ common /shwi/ shwi
 common /ptype/ kindp
 common /correl/ corr,bcorr,bcorrt
 common /bnd/ cn
-common /rst/ nbond,nangles
+common /rst/ nbond
 common /typel/ typelist,ntype
 common /ptypeall/ kindpall
 common /top/ cln,nrow,ncol 
-common /angl/ ca,angles 
 common /vale/ val
 
 integer*4 natms,natmsfan,count
@@ -1932,7 +1798,7 @@ real*4 rxb,ryb,rzb,vxb,vyb,vzb
 integer*4 i,j,k,i1,i2,i3,bt,at
 logical exists
 character*9   dummy
-integer*4 nbond,kb,nangles
+integer*4 nbond,kb
 integer*1 typelist(10),ntype
 
 real*4,pointer :: rx(:,:),ry(:,:),rz(:,:) 
@@ -1943,8 +1809,6 @@ integer*1,pointer :: bcorrt(:)
 integer*4,pointer :: cn(:,:) 
 integer*1,pointer :: kindpall(:) 
 integer*4,pointer :: bond(:) 
-integer*4,pointer :: ca(:,:) 
-integer*4,pointer :: angles(:) 
 integer*1,pointer :: val(:) 
 
 inquire( file = 'restart.dat', exist = exists )
@@ -1986,7 +1850,7 @@ fsz=max0(int(shwi*dly*dlz*8*3*rho),int(shwi*dlx*dlz*8*3*rho))
 allocate (rx(sz,3),ry(sz,3),rz(sz,3),vx(sz),vy(sz),vz(sz))
 allocate (kindp(sz,3))
 allocate (corr(sz,3),bcorr(npall),bcorrt(npall))
-allocate (cn(npall,0:0),ca(npall,0:0))
+allocate (cn(npall,0:0))
 allocate (kindpall(npall))
 allocate (val(npall))
 
@@ -2002,7 +1866,6 @@ vx=0
 vy=0
 vz=0
 cn=0
-ca=0
 ntype=0
 typelist=0
 
@@ -2010,16 +1873,30 @@ typelist=0
 ! add fix: type 1 - chain, boxsize = dlxa/2-1; type 2 - solvent, boxsize = dlxa
 do i = 1, npall
     read(1,'(i8,2i4,3f14.6)', err=10, end=10)corrb,valb,kindpb,rxb,ryb,rzb
+    if (kindpb==1) then
+        if (rxb>(dlxa/2-1)) rxb=rxb-int(rxb/(dlxa/2-1))*(dlxa/2-1)
+        if (rxb<0) rxb=rxb+(dlxa/2-1)*(abs(int(rxb/(dlxa/2-1)))+1)
+        if (ryb>(dlya/2-1)) ryb=ryb-int(ryb/(dlya/2-1))*(dlya/2-1)
+        if (ryb<0) ryb=ryb+(dlya/2-1)*(abs(int(ryb/(dlya/2-1)))+1)
+        if (rzb>(dlza/2-1)) rzb=rzb-int(rzb/(dlza/2-1))*(dlza/2-1)
+        if (rzb<0) rzb=rzb+(dlza/2-1)*(abs(int(rzb/(dlza/2-1)))+1)
+        kindpall(corrb)=kindpb
+        val(corrb)=valb
+    else if (kindpb==2) then
+        if (rxb>dlxa) rxb=rxb-int(rxb/dlxa)*dlxa
+        if (rxb<0) rxb=rxb+dlxa*(abs(int(rxb/dlxa))+1)
+        if (ryb>dlya) ryb=ryb-int(ryb/dlya)*dlya
+        if (ryb<0) ryb=ryb+dlya*(abs(int(ryb/dlya))+1)
+        if (rzb>dlza) rzb=rzb-int(rzb/dlza)*dlza
+        if (rzb<0) rzb=rzb+dlza*(abs(int(rzb/dlza))+1)
+        kindpall(corrb)=kindpb
+        val(corrb)=valb
+    else
+        stop 'Type of the bead does not equal 1 or 2. Check the restart.dat file.'
+    end if
 
     ! move current bead inside the simulation box
-    if (rxb>dlxa) rxb=rxb-int(rxb/dlxa)*dlxa
-    if (rxb<0) rxb=rxb+dlxa*(abs(int(rxb/dlxa))+1)
-    if (ryb>dlya) ryb=ryb-int(ryb/dlya)*dlya
-    if (ryb<0) ryb=ryb+dlya*(abs(int(ryb/dlya))+1)
-    if (rzb>dlza) rzb=rzb-int(rzb/dlza)*dlza
-    if (rzb<0) rzb=rzb+dlza*(abs(int(rzb/dlza))+1)
-    kindpall(corrb)=kindpb
-    val(corrb)=valb
+    
   
     ! obtain list of avaliable beads types
     do j = 1, ntype
@@ -2085,43 +1962,6 @@ end do
 ! delete temporary bonds array
 nullify(bond)
 
-! read angles information
-read(1,'(a9,i9)', err=10, end=10) dummy,nangles
-allocate (angles(3*nangles))
-kb = 1
-do i = 1, nangles
-    read(1,*, err=10, end=10) i1,i2,i3
-    angles(kb)=i1
-    angles(kb+1)=i2
-    angles(kb+2)=i3
-    kb=kb+3
-    ca(i1,0) = ca(i1,0) + 1
-    ca(i2,0) = ca(i2,0) + 1
-    ca(i3,0) = ca(i3,0) + 1
-end do
-
-! define maximum number of angles per bead
-kb=maxval(ca(:,0))
-nullify (ca)
-
-! allocate angles matrix array using maximum number of bonds per bead
-allocate (ca(npall,0:kb))
-ca=0
-kb=1
-
-! generate angles matrix array
-do i = 1, nangles
-    i1=angles(kb)
-    i2=angles(kb+1)
-    i3=angles(kb+2)
-    kb=kb+3
-    ca(i1,0) = ca(i1,0) + 1
-    ca(i1,ca(i1,0)) = i
-    ca(i2,0) = ca(i2,0) + 1
-    ca(i2,ca(i2,0)) = i
-    ca(i3,0) = ca(i3,0) + 1
-    ca(i3,ca(i3,0)) = i
-end do
 close(1)
 
 ! set initial velocities to 0
@@ -2160,7 +2000,7 @@ common /prs/ press
 common /ptypeall/ kindpall
 common /basndrcfa/ sndb,rcvb
 common /bmult/ mult
-common /rst/ nbond,nangles
+common /rst/ nbond
 common /shwi/ shwi
 
 real*4 dlx,dly,dlz,rcut
@@ -2173,7 +2013,7 @@ integer*4 rank, nproc,cln,nrow,ncol
 real*4 rxij,ryij,rzij,rijsq
 integer*4 sz
 logical init/.true./
-integer*4 kpbc,nbond,nangles
+integer*4 kpbc,nbond
 integer*4 arrsize
 real*4 press(3)
 real*4 shwi
@@ -2195,7 +2035,7 @@ if (nbond==0) return
 if (init) then
     init=.false.
     arrsize=mult*int(18*(2*dlx*dlz+2*dly*dlz)/(shwi**2))
-    allocate( mb(sz,2),rcount(nproc),displ(nproc),sndb(arrsize),rcvb(nproc*arrsize) )
+    allocate( mb(sz*mult,2),rcount(nproc),displ(nproc),sndb(arrsize),rcvb(nproc*arrsize) )
 end if
 
 ! zero arrays
@@ -2350,6 +2190,7 @@ do i=0,allnum-1,4
     mbnum=mbnum-shft
 end do
 if (mbnum/=0) then
+    write(*,*) 'mbnum = ', mbnum
     call error(161)
 end if
 
@@ -2407,11 +2248,10 @@ common /mpidpd/ rank, nproc
 common /rxyz/ rx,ry,rz
 common /vxyz/ vx,vy,vz
 common /ptype/ kindp
-common /rst/ nbond,nangles
+common /rst/ nbond
 common /bnd/ cn 
 common /correl/ corr,bcorr,bcorrt
 common /top/ cln,nrow,ncol 
-common /angl/ ca,angles 
 common /vale/ val 
 common /den/ rho  
 common /ptypeall/ kindpall
@@ -2421,7 +2261,7 @@ real*4 dlxa,dlya,dlza
 integer*4 npall,kpbc,natms,natmsfan
 integer*4 rank,nproc,cln,nrow,ncol
 integer*4 i,j,ip,nre,ipos
-integer*4 nbond,nangles
+integer*4 nbond
 real*4 rho
 character*16 cre
 integer b
@@ -2433,8 +2273,6 @@ integer*1,pointer :: kindp(:,:)
 integer*4,pointer :: corr(:,:),bcorr(:)
 integer*1,pointer :: bcorrt(:) 
 integer*4,pointer :: cn(:,:)
-integer*4,pointer :: ca(:,:) 
-integer*4,pointer :: angles(:)
 integer*1,pointer :: val(:)
 integer*1,pointer :: kindpall(:)
 
@@ -2481,405 +2319,8 @@ if (rank==0) then
             if(i<cn(i,j)) write(11,'(2i8)') i, cn(i,j)
         end do    
     end do
-
-    ! write angles
-    write(11,'(a9,i9)') ' angles: ',nangles
-    do i = 1, nangles
-        write(11,'(3i8)') angles(3*i-2),angles(3*i-1),angles(3*i)
-    end do
     close(11, status = 'keep')
 end if
-
-end
-
-subroutine forcesangle()
-! #################################################################
-! #                                                               #
-! #    subroutine 19:                                             #
-! #    calculate angles forces                                    #
-! #                                                               #
-! #################################################################
-implicit none
-include "mpif.h"
-save
-
-common /rxyz/ rx,ry,rz
-common /fxyz/ fx,fy,fz
-common /na/ natms,natmsfan
-common /cella/ dlxa,dlya,dlza
-common /correl/ corr,bcorr,bcorrt
-common /angl/ ca,angles
-common /mpidpd/ rank, nproc
-common /sizes/ sz
-common /cell/ dlx,dly,dlz,rcut,kpbc
-common /top/ cln,nrow,ncol 
-common /prs/ press 
-common /anglef/ k_eqa,k_angle
-common /ptypeall/ kindpall 
-common /basndrcfa/ sndb,rcvb
-
-real*4 dlx,dly,dlz,rcut
-integer*4 natms,natmsfan,mbnum,allnum
-integer nam,ierr
-real*4 dlxa,dlya,dlza
-integer*4 i,i1,i2,j,na,k,i2b,shft,j1,j2,j3,j1a,j2a,j3a
-integer*1 arrtype1,arrtype2,arrtype3,flag
-integer*4 rank, nproc,cln,nrow,ncol
-real*4 rxij,ryij,rzij,rijsq
-real*4 w(9),g(9)
-real*4 press(3)
-integer*4 sz
-integer*4 arrsize
-integer*4 kpbc
-logical init /.true./
-
-real*4,pointer :: rx(:,:),ry(:,:),rz(:,:)
-integer*4,pointer :: mb(:) 
-real*4,pointer :: fx(:),fy(:),fz(:) 
-integer*4,pointer :: corr(:,:),bcorr(:)
-integer*1,pointer :: bcorrt(:) 
-integer*4,pointer :: cn(:,:) 
-integer,pointer :: rcount(:),displ(:)
-real*4,pointer :: sndb(:), rcvb(:) 
-integer*4,pointer :: ca(:,:) 
-integer*4,pointer :: angles(:)
-real*4,pointer :: k_eqa(:,:,:),k_angle(:,:,:)
-integer*1,pointer :: kindpall(:)
-
-! allocate arrays for communications
-if (init) then
-    init=.false.
-    allocate( mb(sz*4),rcount(nproc),displ(nproc))
-    arrsize=size(sndb)
-end if
-
-! zero arrays
-flag=0
-mbnum=0
-nam=0
-
-! loop over all beads on each node 
-do i=1,natms
-    i1=corr(i,1)
-    na=ca(i1,0)
-
-    ! loop over all angles of the bead
-    do k=1,na
-        i2=ca(i1,k) !angle number
-        j1a=angles(i2*3-2)
-        j2a=angles(i2*3-1)
-        j3a=angles(i2*3)
-        arrtype1=bcorrt(j1a)
-        arrtype2=bcorrt(j2a)
-        arrtype3=bcorrt(j3a)
-
-        ! check if there is information about all beads in the angle
-        if (arrtype1*arrtype2*arrtype3/=0) then
-            j1=bcorr(j1a)
-            j2=bcorr(j2a)
-            j3=bcorr(j3a)
-            w(1) = rx(j1,arrtype1)
-            w(2) = ry(j1,arrtype1)
-            w(3) = rz(j1,arrtype1)
-            w(4) = rx(j2,arrtype2)
-            w(5) = ry(j2,arrtype2)
-            w(6) = rz(j2,arrtype2)
-            w(7) = rx(j3,arrtype3)
-            w(8) = ry(j3,arrtype3)
-            w(9) = rz(j3,arrtype3)
-
-            ! calculate forces and internal coordinates
-            call vilangle ( k_angle(kindpall(j1a),kindpall(j2a),kindpall(j3a)),k_eqa(kindpall(j1a),kindpall(j2a),kindpall(j3a)) , w, g )
-            
-            ! add forces and calculate virial for pressure calculation
-            if(i==j1.and.arrtype1==1) then
-                fx(i) = fx(i) + g(1)
-                fy(i) = fy(i) + g(2)
-                fz(i) = fz(i) + g(3)
-            elseif (i==j2.and.arrtype2==1) then
-                fx(i) = fx(i) + g(4)
-                fy(i) = fy(i) + g(5)
-                fz(i) = fz(i) + g(6)
-                press(1)=press(1)+g(4)*w(1)+g(7)*(w(4)+w(1))
-                press(2)=press(2)+g(5)*w(2)+g(8)*(w(5)+w(2))
-                press(3)=press(3)+g(6)*w(3)+g(9)*(w(6)+w(3))
-            elseif (i==j3.and.arrtype3==1) then
-                fx(i) = fx(i) + g(7)
-                fy(i) = fy(i) + g(8)
-                fz(i) = fz(i) + g(9)
-            end if
-
-        ! if there is no information about some angle bead - put it to the list of lost connections
-        else
-            mb(mbnum+1)=i
-            mb(mbnum+2)=j1a
-            mb(mbnum+3)=j2a
-            mb(mbnum+4)=j3a
-
-            ! find out which bead is lost
-            if (arrtype1==0) then
-                nam=nam+1
-                if (nam>arrsize) call error(190)
-                sndb(nam)=real(j1a)
-            end if
-            if (arrtype2==0) then
-                nam=nam+1
-                if (nam>arrsize) call error(190)
-                sndb(nam)=real(j2a)
-            end if
-            if (arrtype3==0) then
-                nam=nam+1
-                if (nam>arrsize) call error(190)
-                sndb(nam)=real(j3a)
-            end if
-            mbnum=mbnum+4
-        end if
-    end do
-end do
-
-! gather number of lost beads
-call MPI_Allgather (nam, 1, MPI_integer, rcount, 1, MPI_integer, MPI_Comm_world,ierr )
-displ(1)=0
-do i=2,nproc
-    displ(i)=displ(i-1)+rcount(i-1)
-end do
-allnum=displ(nproc)+rcount(nproc)
-
-! gather list of lost beads
-call MPI_Allgatherv(sndb, nam,MPI_real4, rcvb, rcount, displ, MPI_real4, MPI_Comm_world,ierr)
-nam=0
-
-! look for information about lost beads on each node
-do k=1,allnum
-    if (bcorrt(int(rcvb(k)))==1) then
-        i=bcorr(int(rcvb(k)))
-        nam=nam+4
-        if (nam>arrsize) call error(190)
-        sndb(nam-3)=k
-        sndb(nam-2)=rx(i,1)+(ncol-1)*dlx
-        sndb(nam-1)=ry(i,1)+(nrow-1)*dly
-        sndb(nam)=rz(i,1)
-    end if
-end do
-
-! place information found this way to the array in the order of receiving
-rcvb(1:allnum*3)=0
-do k=1,nam,4
-    i=sndb(k)*3-2
-    rcvb(i)=sndb(k+1)
-    rcvb(i+1)=sndb(k+2)
-    rcvb(i+2)=sndb(k+3)
-end do
-
-! gather linformation about found angles beads
-call mpi_allreduce(mpi_in_place,rcvb,allnum*3,mpi_real,mpi_sum,mpi_comm_world,ierr)
-
-! use collected information to calculate angle forces
-i1=displ(rank+1)*3+1
-do j=1,mbnum,4
-    i=mb(j)
-    j1a=mb(j+1)
-    j2a=mb(j+2)
-    j3a=mb(j+3)
-    arrtype1=bcorrt(j1a)
-    arrtype2=bcorrt(j2a)
-    arrtype3=bcorrt(j3a)
-
-    ! get beads coordinates
-    if (arrtype1==0) then
-        w(1)=rcvb(i1)-(ncol-1)*dlx
-        w(2)=rcvb(i1+1)-(nrow-1)*dly
-        w(3)=rcvb(i1+2)
-        i1=i1+3
-    else
-        j1=bcorr(j1a)
-        w(1) = rx(j1,arrtype1)
-        w(2) = ry(j1,arrtype1)
-        w(3) = rz(j1,arrtype1)
-    end if
-    if (arrtype2==0) then
-        w(4)=rcvb(i1)-(ncol-1)*dlx
-        w(5)=rcvb(i1+1)-(nrow-1)*dly
-        w(6)=rcvb(i1+2)
-        i1=i1+3
-    else
-        j2=bcorr(j2a)
-        w(4) = rx(j2,arrtype2)
-        w(5) = ry(j2,arrtype2)
-        w(6) = rz(j2,arrtype2)
-    end if
-    if (arrtype3==0) then
-        w(7)=rcvb(i1)-(ncol-1)*dlx
-        w(8)=rcvb(i1+1)-(nrow-1)*dly
-        w(9)=rcvb(i1+2)
-        i1=i1+3
-    else
-        j3=bcorr(j3a)
-        w(7) = rx(j3,arrtype3)
-        w(8) = ry(j3,arrtype3)
-        w(9) = rz(j3,arrtype3)
-    end if
-
-    ! calculate forces and internal coordinates
-    call vilangle ( k_angle(kindpall(j1a),kindpall(j2a),kindpall(j3a)),k_eqa(kindpall(j1a),kindpall(j2a),kindpall(j3a)), w, g )
-
-    ! calculate forces and virial for pressure calculation
-    if(i==j1.and.arrtype1==1) then
-        
-        ! if 1st bead in the angle is a real bead
-        fx(i) = fx(i) + g(1)
-        fy(i) = fy(i) + g(2)
-        fz(i) = fz(i) + g(3)
-    elseif (i==j2.and.arrtype2==1) then
-
-        ! if 2nd bead in the angle is a real bead
-        fx(i) = fx(i) + g(4)
-        fy(i) = fy(i) + g(5)
-        fz(i) = fz(i) + g(6)
-        press(1)=press(1)+g(4)*w(1)+g(7)*(w(4)+w(1))
-        press(2)=press(2)+g(5)*w(2)+g(8)*(w(5)+w(2))
-        press(3)=press(3)+g(6)*w(3)+g(9)*(w(6)+w(3))
-    elseif (i==j3.and.arrtype3==1) then
-
-        ! if 3rd bead in the angle is a real bead
-        fx(i) = fx(i) + g(7)
-        fy(i) = fy(i) + g(8)
-        fz(i) = fz(i) + g(9)
-    end if
-end do
-
-end
-
-subroutine vilangle( ca, a0, x, f )
-! #################################################################
-! #                                                               #
-! #    subroutine 20:                                             #
-! #    calculate forces acting on angle beads using               #
-! #    vilson s-vector 1-2-3                                      #
-! #                                                               #
-! #################################################################
-implicit real*4 (a-h,o-z)
-real*4 x(9),f(9),e1(3),e2(3)
-
-call one(x(4),x(1),e1,b1)
-call one(x(7),x(4),e2,b2)
-
-cosa=-dotd(e1,e2)
-qimj=ang(cosa)
-
-sina=sqrt(abs(1.0-cosa*cosa))
-
-if(sina<1.0e-5)go to 20
-da=(qimj-a0)*1.7453292e-2
-a1=1.0/(b1*sina)
-a2=-1.0/(b2*sina)
-uq=ca*da*da
-f0=-2.0*ca*da
-do 10 k=1,3
-    s1=(e1(k)*cosa+e2(k))*a1
-    s3=(e2(k)*cosa+e1(k))*a2
-    s2=-s1-s3
-    f(k)=f0*s1
-    f(k+3)=f0*s2
-    f(k+6)=f0*s3
-10 continue
-return
-20 uq=0.0
-do 30 i=1,9
-30 f(i)=0.0
-
-return
-end
-
-subroutine one(x1,x2,e,r)
-! #################################################################
-! #                                                               #
-! #    subroutine 21:                                             #
-! #    calculate unit vector and internal coordinates of beads    #
-! #                                                               #
-! #################################################################
-implicit real*4 (a-h,o-z)
-common /cella/ dlxa,dlya,dlza    
-real*4 x1(3),x2(3),e(3)
-real*4 dlxa,dlya,dlza
-
-a=x2(1)-x1(1)
-b=x2(2)-x1(2)
-c=x2(3)-x1(3)
-
-! apply PBC
-if (a>dlxa/2) then 
-    a=a-dlxa
-elseif (a<-dlxa/2) then
-    a=a+dlxa
-end if      
-if (b>dlya/2) then 
-    b=b-dlya
-elseif (b<-dlya/2) then
-    b=b+dlya
-end if    
-if (c>dlza/2) then 
-    c=c-dlza
-elseif (c<-dlza/2) then
-    c=c+dlza
-end if
-
-! calculate vector length
-r=sqrt(a*a+b*b+c*c)+1.0e-5
-
-! calculate angle internal coordinates
-x2(1)=-a
-x2(2)=-b
-x2(3)=-c
-
-! calcuclate unit vector
-e(1)=a/r
-e(2)=b/r
-e(3)=c/r
-
-end
-
-real*4 function ang ( c )
-! #################################################################
-! #                                                               #
-! #    function 22:                                               #
-! #    find angle (in grad), using its cosine (c)                 #
-! #                                                               #
-! #################################################################
-implicit real*4 (a-h, o-z)
-save
-
-data key/0/
-
-if(key/=0)go to 20
-pi=4.0*atan(1.e0)
-d=180.0/pi
-e=1.0
-10 e=e/2.0
-t=1.0 + e
-if(t>1.0)go to 10
-e=sqrt(e)
-key=1
-
-20 a=pi/2.0
-if(abs(c)<=0.0)go to 30
-a=atan(sqrt(abs(1.0-c*c))/c)
-if(a<0.0)a=a+pi
-30 ang=a*d
-
-end
-
-real*4 function dotd(e1,e2)
-! #################################################################
-! #                                                               #
-! #    function 23:                                               #
-! #    calculate scalar product of vectors                        #
-! #                                                               #
-! #################################################################
-implicit real*4 (a-h,o-z)
-real*4 e1(3),e2(3)
-
-dotd=e1(1)*e2(1)+e1(2)*e2(2)+e1(3)*e2(3)
 
 end
 
@@ -2923,138 +2364,6 @@ call mpi_allreduce(mpi_in_place,press,3,mpi_real,mpi_sum,mpi_comm_world,ierr)
 
 ! calculate pressure
 press=press/volm
-
-end
-
-subroutine deform(tau,tai)
-! #################################################################
-! #                                                               #
-! #    subroutine 25:                                             #
-! #    perform affine deformation of the system                   #
-! #                                                               #
-! #################################################################
-implicit none
-save
-
-common /rxyz/ rx,ry,rz
-common /cella/ dlxa,dlya,dlza
-common /na/ natms,natmsfan
-common /cell/ dlx,dly,dlz,rcut,kpbc
-common /bxsize/ ilx,ily,ilz
-
-real*4,pointer :: rx(:,:),ry(:,:),rz(:,:)
-
-real*8 mu(3),volm
-real*4 dlxa,dlya,dlza
-real*4 dlx,dly,dlz,rcut
-integer*4 natms,natmsfan,kpbc,ilx,ily,ilz
-real*4 tai,tau
-logical init /.true./
-
-! calculate initial values
-if(init) then
-    volm = dlxa*dlya*dlza
-    mu(1)=tai**2
-    mu(2)=tai
-    mu(3)=tai
-    init=.false.
-end if
-
-! stretching along x
-if (tau>=0) then
-    dlxa=dlxa*mu(1)
-    dlya=dlya/mu(2)
-    dlza=dlza/mu(3)
-    dlx=dlx*mu(1)
-    dly=dly/mu(2)
-    dlz=dlz/mu(3)
-    ilx=int(dlx/rcut)
-    ily=int(dly/rcut)
-    ilz=int(dlz/rcut)
-    rx(1:natms,1)=rx(1:natms,1)*mu(1)
-    ry(1:natms,1)=ry(1:natms,1)/mu(2)
-    rz(1:natms,1)=rz(1:natms,1)/mu(3)
-    if (dly<rcut) call error(251)
-    if (dlz<rcut) call error(252)
-! compression along x
-else
-    dlxa=dlxa/mu(1)
-    dlya=dlya*mu(2)
-    dlza=dlza*mu(3)
-    dlx=dlx/mu(1)
-    dly=dly*mu(2)
-    dlz=dlz*mu(3)
-    ilx=int(dlx/rcut)
-    ily=int(dly/rcut)
-    ilz=int(dlz/rcut)
-    rx(1:natms,1)=rx(1:natms,1)/mu(1)
-    ry(1:natms,1)=ry(1:natms,1)*mu(2)
-    rz(1:natms,1)=rz(1:natms,1)*mu(3)
-    if (dlx<rcut) call error(253)
-end if
-
-end
-
-subroutine pressout(flag)
-! #################################################################
-! #                                                               #
-! #    subroutine 26:                                             #
-! #    output stress-strain curve                                 #
-! #                                                               #
-! #################################################################
-implicit none
-save
-
-logical init /.true./
-common /cella/ dlxa,dlya,dlza
-common /prs/ press
-common /defor/ nave 
-
-integer*4 steps3,qstp,nout,nit,i,nit2
-real*4 dlxa,dlya,dlza,L0
-real*4 press(3)
-integer flag
-integer*4 nave
-real*8 volm,sd
-real*8,pointer :: presx(:),presy(:),presz(:)
-
-! allocate pressure arrays, set initial values
-if (init) then
-    init=.false.
-    allocate(presx(nave),presy(nave),presz(nave))
-    presx=0
-    presy=0
-    presz=0
-    sd=0
-    L0=dlxa
-    open (1,file='Stress-Strain.dat')
-    close (1,status='delete')
-    nit=0
-    volm = dlxa*dlya*dlza
-end if
-
-! collect pressures for averaging
-if (flag==0) then
-    nit=nit+1
-    presx(nit)=dble(press(1))
-    presy(nit)=dble(press(2))
-    presz(nit)=dble(press(3))
-
-! output stress-strain curve
-else
-    open (1,file='Stress-Strain.dat',position= 'append')
-
-    ! calculate standard deviation
-    if (nit>1) then
-        do i=1,nit
-            sd=sd+(presx(i)-sum(presx(1:nit))/dble(nit))**2
-        end do
-        sd=sqrt(sd/(nit-1))
-    end if
-    write(1,'(9f16.9,i8)'),dlxa/L0,sum(presx(1:nit))/dble(nit),sd,sum(presy(1:nit))/dble(nit),sum(presz(1:nit))/dble(nit),dlxa,dlya,dlza,dlxa*dlya*dlza/volm-1,nit
-    nit=0
-    close(1)
-end if
 
 end
 
@@ -3128,7 +2437,7 @@ if (flag==1) go to 334
 
 end
 
-subroutine rconf(steps1,steps2,steps3,qstp,rst,rststp,stepsdef,ndef,tau,tai,def_res)
+subroutine rconf(steps1,steps2,qstp)
 ! #################################################################
 ! #                                                               #
 ! #    subroutine 32:                                             #
@@ -3144,19 +2453,12 @@ common /time/ dt
 common /shwi/ shwi
 common /mpidpd/ rank, nproc 
 common /bondf/ k_eq,k_bond 
-common /anglef/ k_eqa,k_angle
 common /bmult/ mult
-common /defor/ nave 
 common /lambd/ lambda
 
-character*16,pointer :: fnames(:)
-real*4,pointer :: conc(:)
 real*4,pointer :: alpha(:,:)
-integer*1,pointer :: anglestempl(:,:)
-integer*1,pointer :: vallist(:),place(:)
 character*2,pointer :: bead_type(:)
 real*4,pointer :: k_eq(:,:),k_bond(:,:)
-real*4,pointer :: k_eqa(:,:,:),k_angle(:,:,:)
 
 character*256 str
 character*2 el
@@ -3164,283 +2466,49 @@ character*2 el
 integer*4 i,j,k
 integer*1 rtype,snum,spnum,s1,s2,atempl
 real*4 dlxa,dlya,dlza,dt,sigma,gamma
-integer*4 steps1,steps2,steps3,stepsdef
+integer*4 steps1,steps2
 real*4 alph,prob,probr
 real*4 rho,shwi
-integer*4 rst,qstp,rststp,nave,ndef
-real*4 tai,tau
+integer*4 qstp
 integer*4 rank,nproc,mult
 logical exists
-real*4 graftdens
-integer*4 ntlength
 real*4 lambda
-integer*1 def_res
-real*4 sphrad
 
 ! set default values
-rst=0
+! * technical values
 sigma=3.0
 shwi=1.0
-rststp=50000
-steps2=0
-steps1=0
-steps3=0
-stepsdef=0
+steps1=1000
+steps2=100000
 spnum=0
-mult=1
+mult=100
 dt=0.04
 qstp=1000
-ntlength=40
-sphrad=2.0
-graftdens=0.0
-def_res=0
-
-! check if input script exists
-inquire( file = 'dpdconf.dat', exist = exists )
-if ( .not. exists ) goto 14
-
-open(1, file = 'dpdconf.dat')
-read (1,'(a256)') str
-do i=1,256
-    if (str(i:i)/=' '.and.str(i:i)/=char(09)) exit
-end do
-rtype=0
-
-! read type of simulation
-if (str(i:i+len('run_type')-1)=='run_type') then
-    read (str(i+len('run_type'):256),*,err=15,end=15) el
-    if (el(1:2)=='co') then
-        rtype=1
-    elseif (el(1:2)=='re') then
-        rtype=2
-    else
-        call error(320)
-    end if
-end if
-
 atempl=0
 
 ! allocate all arrays
-allocate(k_eq(10,10),k_bond(10,10),alpha(10,10),anglestempl(1000,3),vallist(10),bead_type(10),k_eqa(10,10,10),k_angle(10,10,10))
-vallist=0
+allocate(k_eq(10,10),k_bond(10,10),alpha(10,10),bead_type(10))
 alpha=25.0
-k_eq=0.0
-k_eqa=180.0
-k_bond=4.0
-k_angle=0.0
-snum=0
-bead_type='  '
+k_eq=0.5
+k_bond=40.0
 lambda=0.65
 
-! read information from script file
-do
-    if (rtype==0) call error(321)
+alpha(1,2)=26.75
+rho=3.0
+bead_type(1)='  C'
+bead_type(2)='  O'
 
-    read (1,'(a256)') str
-    do i=1,256
-        if (str(i:i)/=' '.and.str(i:i)/=char(09)) exit
-    end do
-    if (i==257) cycle
-
-    if (str(i:i+2)=='end') exit
-
-    if (str(i:i+9)=='input_file') then
-        j=i+10
-        if (snum==0.and.rtype==1) call error(322)
-        do
-            do i=j,256
-                if (str(i:i)/=' '.and.str(i:i)/=char(09)) exit
-            end do
-        
-            if (i==257) exit
-            spnum=spnum+1
-            k=1
-            do j=i,256
-                if (str(j:j)/=' '.and.str(j:j)/=char(09))then
-                    fnames(spnum)(k:k)=str(j:j)
-                    k=k+1
-                else
-                    exit
-                end if
-            end do
-        end do
-    end if
-
-    if (i==257) cycle
-
-    if (str(i:i+len('species_number')-1)=='species_number') then
-        read (str(i+len('species_number'):256),*,err=4,end=4) snum
-        allocate (fnames(snum),conc(snum),place(snum))
-        place=1
-        fnames=' '
-        conc=0
-    end if
-    
-    if (str(i:i+13)=='concentrations') then
-        if (snum==0) goto 1
-        read (str(i+14:256),*,err=2,end=2) conc(1:snum)
-        if (sum(conc(1:snum))/=100.and.rtype==1) goto 3
-    end if
-
-    if (str(i:i+len('place')-1)=='place') then
-        if (snum==0) goto 1
-        read (str(i+len('place'):256),*,err=21,end=21) s1,s2
-        place(s1)=s2
-    end if
-
-    if (str(i:i+7)=='box_size') then
-        read (str(i+8:256),*,err=5,end=5) dlxa,dlya,dlza
-    end if
-
-    if (str(i:i+7)=='timestep') then
-        read (str(i+8:256),*,err=7,end=7) dt
-    end if
-
-    if (str(i:i+6)=='steps_1') then
-        read (str(i+7:256),*,err=8,end=8) steps1
-    end if
-
-    if (str(i:i+6)=='steps_2') then
-        read (str(i+7:256),*,err=9,end=9) steps2
-    end if
-
-    if (str(i:i+6)=='steps_3') then
-        read (str(i+7:256),*,err=10,end=10) steps3
-    end if
-
-    if (str(i:i+9)=='pair_coeff') then
-        read (str(i+10:256),*,err=12,end=12) s1,s2,alph
-
-        ! apply wildcards
-        if (s1==0.and.s2/=0) then
-            do s1=1,10
-                alpha(s1,s2)=alph
-                alpha(s2,s1)=alph
-            end do
-        elseif (s1/=0.and.s2==0) then
-            do s2=1,10
-                alpha(s1,s2)=alph
-                alpha(s2,s1)=alph
-            end do
-        elseif (s1==0.and.s2==0) then
-            do s2=1,10
-                do s1=1,10
-                    alpha(s1,s2)=alph
-                    alpha(s2,s1)=alph
-                end do
-            end do
-        else
-            alpha(s1,s2)=alph
-            alpha(s2,s1)=alph
-        end if
-    end if
-
-    if (str(i:i+len('dpd_density')-1)=='dpd_density') then
-        read (str(i+len('dpd_density'):256),*,err=15,end=15) rho
-    end if
-
-    if (str(i:i+len('output_freq')-1)=='output_freq') then
-        read (str(i+len('output_freq'):256),*,err=16,end=16) qstp
-    end if
-
-    if (str(i:i+len('angle_template')-1)=='angle_template') then
-        atempl=atempl+1
-        read (str(i+len('angle_template'):256),*,err=17,end=17) anglestempl(atempl,1),anglestempl(atempl,2),anglestempl(atempl,3),alph,prob
-        k_eqa(anglestempl(atempl,1),anglestempl(atempl,2),anglestempl(atempl,3))=alph
-        k_eqa(anglestempl(atempl,3),anglestempl(atempl,2),anglestempl(atempl,1))=alph
-        k_angle(anglestempl(atempl,3),anglestempl(atempl,2),anglestempl(atempl,1))=prob
-        k_angle(anglestempl(atempl,1),anglestempl(atempl,2),anglestempl(atempl,3))=prob
-    end if
-
-    if (str(i:i+len('bond_template')-1)=='bond_template') then
-        read (str(i+len('bond_template'):256),*,err=18,end=18) s1,s2,alph,prob
-
-        ! apply wildcards
-        if (s1==0.and.s2/=0) then
-            do s1=1,10
-                k_eq(s1,s2)=alph
-                k_eq(s2,s1)=alph
-                k_bond(s1,s2)=prob
-                k_bond(s2,s1)=prob
-            end do
-        elseif (s1/=0.and.s2==0) then
-            do s2=1,10
-                k_eq(s1,s2)=alph
-                k_eq(s2,s1)=alph
-                k_bond(s1,s2)=prob
-                k_bond(s2,s1)=prob
-            end do
-        elseif (s1==0.and.s2==0) then
-            do s2=1,10
-                do s1=1,10
-                    k_eq(s1,s2)=alph
-                    k_eq(s2,s1)=alph
-                    k_bond(s1,s2)=prob
-                    k_bond(s2,s1)=prob
-                end do
-            end do
-        else
-            k_eq(s1,s2)=alph
-            k_eq(s2,s1)=alph
-            k_bond(s1,s2)=prob
-            k_bond(s2,s1)=prob
-        end if
-    end if
-
-    if (str(i:i+len('shwi')-1)=='shwi') then
-        read (str(i+len('shwi'):256),*,err=26,end=26) shwi
-    end if
-
-    if (str(i:i+len('valency')-1)=='valency') then
-        read (str(i+len('valency'):256),*,err=19,end=19) s1,s2
-        vallist(s1)=s2
-    end if
-
-    if (str(i:i+len('deform')-1)=='deform') then
-        read (str(i+len('deform'):256),*,err=20,end=20) stepsdef,ndef,tau,tai,nave
-    end if
-
-    if (str(i:i+len('restart')-1)=='restart') then
-        read (str(i+len('restart'):256),*,err=23,end=23) rststp
-        rst=1
-    end if
-
-    if (str(i:i+len('bead_type')-1)=='bead_type') then
-        read (str(i+len('bead_type'):256),*,err=25,end=25) s1,el
-        if(s1>10) goto 25
-        bead_type(s1)=el
-    end if
-
-    if (str(i:i+len('nt_shape')-1)=='nt_shape') then
-        read (str(i+len('nt_shape'):256),*,err=27,end=27) ntlength,graftdens
-    end if
-
-    if (str(i:i+len('lambda')-1)=='lambda') then
-        read (str(i+len('lambda'):256),*,err=28,end=28) lambda
-    end if
-
-    if (str(i:i+len('def_res')-1)=='def_res') then
-        read (str(i+len('def_res'):256),*,err=29,end=29) def_res
-    end if
-
-    if (str(i:i+len('sph_shape')-1)=='sph_shape') then
-        read (str(i+len('sph_shape'):256),*,err=30,end=30) sphrad,graftdens
-    end if
-end do
 
 gamma=0.50*sigma*sigma
 
 ! construct initial system
-if (rtype==1.and.rank==0) call construct(fnames,conc,place,snum,anglestempl,atempl,vallist,bead_type,ntlength,sphrad,graftdens)
+!if (rtype==1.and.rank==0) call construct(fnames,conc,place,snum,anglestempl,atempl,vallist,bead_type,ntlength,sphrad,graftdens)
+if (rank==0) call read_geo()
 call barrier
 
-! delete temporary arrays
-nullify(fnames,conc,anglestempl,vallist,place)
 
 return
 1 call error(323)    !stop 'error:spnum=0'
-2 call error(324)    !    stop 'error:conc number'
-3 call error(325)    !    stop 'error:conc/=100'
 4 call error(326)    !    stop 'error:n_species error'
 5 call error(327)    !    stop 'error:box size error'
 6 call error(328)    !    stop 'error:prname error'
@@ -3450,15 +2518,11 @@ return
 10 call error(3212)    !   stop 'error:t1 error'
 11 call error(3213)    !   stop 'error:tch error'
 12 call error(3214)    !   stop 'error:alpha error'
-!13 all error()
 14 call error(3216)    !   stop 'there is no dpdconf.dat file! '
 15 call error(3217)    !   stop 'error:density error!'
 16 call error(3218)    !   stop 'output_freq error'
-17 call error(3219)    !   stop 'angletempl error'
 18 call error(3220)    !   stop 'btempl error'
 19 call error(3221)    !   stop 'val error'
-20 call error(3222)    !   stop 'deform error'
-21 call error(3223)    !   stop 'place error'
 23 call error(3225)    !   stop 'restart error'
 25 call error(3227)    !   stop 'bead_type error'
 26 call error(3228)    !   stop 'shwi error'
@@ -3511,308 +2575,6 @@ end do
 
 end
 
-subroutine construct(fnames,conc,place,snum,anglestempl,atempl,vallist,bead_type,ntlength,sphrad,graftdens)
-! #################################################################
-! #                                                               #
-! #    subroutine 34:                                             #
-! #    construct initial system                                   #
-! #                                                               #
-! #################################################################  
-implicit none
-
-common /cella/ dlxa,dlya,dlza
-common /den/ rho
-
-real*4,pointer :: rxt(:),ryt(:),rzt(:)
-integer*1,pointer :: kindpt(:)
-integer*4,pointer :: b1(:),b2(:),bt(:)
-integer*4,pointer :: cn(:,:),cn2(:,:)
-
-real*4 rho
-real*4 conc(*)
-character*16 fnames(*)
-integer*1 snum,atempl,place(*)
-
-integer*1 anglestempl(1000,3),vallist(10)
-character*2 bead_type(*)
-
-character*3 kindptc
-character*256 str
-character*52 dummy
-integer trimtext
-integer*4 npallt,natmsall,nbondsall,nat,nbd,nmol,nbcur,nbmax,nbmax2,nanglesall
-integer*4 i,j,k,l,i1,i2,i3
-real*4 dlxa,dlya,dlza
-real*4 uni,rndposx,rndposy,rndposz
-real*4 graftdens
-integer*4 ntlength
-real*4 sphrad,rsq,rb
-logical exists
-
-! use 3 temporary files; then combine them to the final file
-open(1, file = 'atoms.dat',status='replace')
-open(2, file = 'bonds.dat',status='replace')
-open(3, file = 'angles.dat',status='replace') 
-
-! calculate maximum number of beads in the box
-npallt=dlxa*dlya*dlza*rho
-natmsall=0
-nbondsall=0
-nanglesall=0
-nbcur=0
-
-! loop over species files
-do k=1,snum
-        inquire( file = fnames(k)(1:trimtext(fnames(k))), exist = exists )
-        if ( .not. exists ) call error(341)
-        open(10, file = fnames(k)(1:trimtext(fnames(k))))
-
-        ! read basic information about current species
-        do
-            read( 10, '(a)') str
-            if ( str(40:44)=='V2000' ) then
-                read(str(1:8),*) nat
-                read(str(9:16),*) nbd
-                exit
-            end if
-        end do
-    
-        ! calculate number of molecules of current species in the cell
-        nmol=npallt*conc(k)/100/nat
-    
-        ! allocate arrays
-        allocate (rxt(nat),ryt(nat),rzt(nat),kindpt(nat))
-        allocate (b1(nbd),b2(nbd),bt(nbd))
-
-        ! read bead structure
-        do i = 1, nat
-            read(10,'(3f10.4,a3)') rxt(i),ryt(i),rzt(i),kindptc
-            do j=1,10
-                if (kindptc(2:3)==bead_type(j)) exit
-            end do
-            if (j==11) call error(340)
-            kindpt(i)=j
-        end do 
-        allocate(cn(nat,0:0),cn2(nat,0:0)) 
-        cn=0
-        cn2=0
-
-    ! read bond structure
-        do i = 1, nbd
-            read(10,*)b1(i),b2(i),bt(i)
-            if(bt(i)==2)cn(b1(i),0)=cn(b1(i),0)+1
-            if(bt(i)==2)cn(b2(i),0)=cn(b2(i),0)+1
-            cn2(b1(i),0)=cn2(b1(i),0)+1
-            cn2(b2(i),0)=cn2(b2(i),0)+1
-        end do
-        nbmax=maxval(cn(:,0))
-        nbmax2=maxval(cn2(:,0))
-        nullify (cn,cn2)
-        allocate (cn(nat,0:nbmax),cn2(nat,0:nbmax2))
-
-        ! constuct connection matrixes for 2 types of bonds: for all bonds and only for double bonds
-        cn=0
-        cn2=0
-        do i = 1, nbd
-            i1=b1(i)
-            i2=b2(i)
-            if(bt(i)==2) then
-              cn(i1,0) = cn(i1,0) + 1
-              cn(i1,cn(i1,0)) = i2
-              cn(i2,0) = cn(i2,0) + 1
-              cn(i2,cn(i2,0)) = i1
-            end if
-            cn2(i1,0) = cn2(i1,0) + 1
-            cn2(i1,cn2(i1,0)) = i2
-            cn2(i2,0) = cn2(i2,0) + 1
-            cn2(i2,cn2(i2,0)) = i1
-        end do
-    
-        ! place molecules in the simulation cell
-        do i=1,nmol
-        
-            ! random rotation variant 
-            if (place(k)==1) then
-                call rndrot(nat,rxt,ryt,rzt)
-                rndposx=(uni())*dlxa
-                rndposy=(uni())*dlya
-                rndposz=(uni())*dlza
-
-	    else if (place(k)==3) then
-		!use coordinates from .mol files
-		else if (place(k)==4) then
-				call rndplace( nat,rxt,ryt,rzt,cn2,dlxa,dlya,dlza, 4 )
-                rndposx = 0
-                rndposy = 0
-                rndposz = 0
-            ! average distance between beads 0.5
-            else
-                call rndplace( nat,rxt,ryt,rzt,cn2,dlxa,dlya,dlza, 2 )
-                rndposx = 0
-                rndposy = 0
-                rndposz = 0
-            end if
-        
-            do j=1,nat
-            
-                ! output information about bead
-                write(1,'(2i4,3f14.6)')vallist(kindpt(j)), kindpt(j),rxt(j)+rndposx,ryt(j)+rndposy,rzt(j)+rndposz
-                natmsall=natmsall+1
-
-                ! find angles types connected with this bead; output angles
-                do i1=1,atempl
-                    if (kindpt(j)==anglestempl(i1,1)) then
-                        do i2=1,cn(j,0)
-                            if (kindpt(cn(j,i2))==anglestempl(i1,2)) then
-                                do i3=1, cn(cn(j,i2),0)
-                                    if (kindpt(cn(cn(j,i2),i3))==anglestempl(i1,3)) then
-                                        if (cn(cn(j,i2),i3)>j) then
-                                            write(3,'(3i8)') j+nbcur,cn(j,i2)+nbcur,cn(cn(j,i2),i3)+nbcur
-                                            nanglesall=nanglesall+1
-                                        end if
-                                    end if
-                                end do
-                            end if
-                        end do
-                        cycle
-                    end if
-                    if (kindpt(j)==anglestempl(i1,3)) then
-                        do i2=1,cn(j,0)
-                            if (kindpt(cn(j,i2))==anglestempl(i1,2)) then
-                                do i3=1, cn(cn(j,i2),0)
-                                    if (kindpt(cn(cn(j,i2),i3))==anglestempl(i1,1)) then
-                                        if (cn(cn(j,i2),i3)>j) then
-                                            write(3,'(3i8)') j+nbcur,cn(j,i2)+nbcur,cn(cn(j,i2),i3)+nbcur
-                                            nanglesall=nanglesall+1
-                                        end if
-                                    end if
-                                end do
-                            end if
-                        end do
-                    end if
-                end do
-            end do
-
-            ! output bonds
-            do j=1,nbd
-                write(2,'(2i8)'),b1(j)+nbcur,b2(j)+nbcur
-                nbondsall=nbondsall+1
-            end do
-            nbcur=nat+nbcur
-        end do
-
-        ! delete temporary arrays
-        nullify (cn,cn2)
-        nullify(rxt,ryt,rzt,kindpt,b1,b2,bt)
-end do
-close(3)
-close(2)
-close(1)
-
-! move information from temporary files to final file
-open(1, file = 'atoms.dat')
-open(2, file = 'bonds.dat') 
-open(3, file = 'restart.dat',status='replace' )
-open(4, file = 'angles.dat') 
-
-! move general information
-write(3,'(i8,f8.4)') natmsall, rho
-write(3,'(3f20.12)') dlxa,dlya,dlza
-
-! move information about beads
-do i = 1, natmsall
-    read (1,'(a50)') dummy
-    write(3,'(i8,a50)')i,dummy
-end do
-close(1,status='delete')
-
-! move information about bonds
-write(3,'(a9,i9)') ' bonds:  ',nbondsall
-do i=1,nbondsall
-    read (2,'(a16)') dummy
-    write(3,'(a16)') dummy
-end do 
-close(2,status='delete')
-
-! move information about angles
-write(3,'(a9,i9)') ' angles:  ',nanglesall
-do i=1,nanglesall
-    read (4,'(a24)') dummy
-    write(3,'(a24)') dummy
-end do 
-close(4,status='delete')
-close(3)
-end
-
-subroutine rndrot(nat,x,y,z)
-! #################################################################
-! #                                                               #
-! #    subroutine 35:                                             #
-! #    rotate molecule through random angle                       #
-! #    around the centre of mass                                  #
-! #                                                               #
-! #################################################################  
-dimension x(*),y(*),z(*)
-dimension rot(9),qtn(4)
-real*4 uni
-
-!construct random quaternions
-
-qtn(1)=(2.0*uni()-1.0)
-qtn(2)=(2.0*uni()-1.0)
-qtn(3)=(2.0*uni()-1.0)
-qtn(4)=(2.0*uni()-1.0)
-
-rnm=1.0/sqrt(qtn(1)**2+qtn(2)**2+qtn(3)**2+qtn(4)**2)
-
-qtn(1)=rnm*qtn(1)
-qtn(2)=rnm*qtn(2)
-qtn(3)=rnm*qtn(3)
-qtn(4)=rnm*qtn(4)
-
-!construct rotation matrix
-
-rot(1) = qtn(1)**2+qtn(2)**2-qtn(3)**2-qtn(4)**2
-rot(2) = 2.d0*(qtn(2)*qtn(3) - qtn(1)*qtn(4))
-rot(3) = 2.d0*(qtn(2)*qtn(4) + qtn(1)*qtn(3))
-rot(4) = 2.d0*(qtn(2)*qtn(3) + qtn(1)*qtn(4))
-rot(5) = qtn(1)**2-qtn(2)**2+qtn(3)**2-qtn(4)**2
-rot(6) = 2.d0*(qtn(3)*qtn(4) - qtn(1)*qtn(2))
-rot(7) = 2.d0*(qtn(2)*qtn(4) - qtn(1)*qtn(3))
-rot(8) = 2.d0*(qtn(3)*qtn(4) + qtn(1)*qtn(2))
-rot(9) = qtn(1)**2-qtn(2)**2-qtn(3)**2+qtn(4)**2
-
-!calculate centre of mass
-
-cma=0.0
-cmx=0.0
-cmy=0.0
-cmz=0.0
-
-do i=1,nat
-    cma=cma+1.0
-    cmx=cmx+x(i)
-    cmy=cmy+y(i)
-    cmz=cmz+z(i)
-end do
-
-cmx=cmx /cma
-cmy=cmy /cma
-cmz=cmz /cma
-
-!rotate cluster about centre of mass
-
-do i=1,nat
-    xs=x(i)-cmx
-    ys=y(i)-cmy
-    zs=z(i)-cmz
-    x(i)=rot(1)*xs+rot(4)*ys+rot(7)*zs+cmx
-    y(i)=rot(2)*xs+rot(5)*ys+rot(8)*zs+cmy
-    z(i)=rot(3)*xs+rot(6)*ys+rot(9)*zs+cmz
-end do
-
-
-end
 
 subroutine rndplace( nat,rxt,ryt,rzt,cn,dlxa,dlya,dlza, place )
 ! #################################################################
@@ -3921,18 +2683,6 @@ end if
 if( flag==160) then
     stop 'error 160:communication array overflow in forcesbond subroutine'
 end if
-if( flag==190) then
-    stop 'error 190:communication array overflow in forcesangle subroutine'
-end if
-if( flag==251) then
-    stop 'error 251:domain size along y became less than Rcut during deformation'
-end if
-if( flag==252) then
-    stop 'error 252:domain size along z became less than Rcut during deformation'
-end if
-if( flag==253) then
-    stop 'error 253:domain size along x became less than Rcut during deformation'
-end if
 if( flag==320) then
     stop 'error 320: input script error, unrecognized run_type'
 end if
@@ -3941,18 +2691,6 @@ if( flag==321) then
 end if
 if( flag==322) then
     stop 'error 322: input script error, number of species should be specified before input_file command'
-end if
-if( flag==325) then
-    stop 'error 325: input script error, sum of concentrations /= 100'
-end if
-if( flag==324) then
-    stop 'error 324: input script error, number of concentrations /= number of species'
-end if
-if( flag==323) then
-    stop 'error 323: input script error, number of species is equal to 0'
-end if
-if( flag==326) then
-    stop 'error 326: input script error, species_number command error'
 end if
 if( flag==327) then
     stop 'error 327: input script error, box_size command error'
@@ -3966,17 +2704,8 @@ end if
 if( flag==3211) then
     stop 'error 3211: input script error, steps_2 command error'
 end if
-if( flag==3212) then
-    stop 'error 3212: input script error, steps_3 command error'
-end if
-if( flag==3213) then
-    stop 'error 3213: input script error, steps_ch command error'
-end if
 if( flag==3214) then
     stop 'error 3214: input script error, pair_coeff command error'
-end if
-if( flag==3216) then
-    stop 'error 3216: input script error, there is no dpdconf.dat file'
 end if
 if( flag==3217) then
     stop 'error 3217: input script error, density command error'
@@ -3984,23 +2713,8 @@ end if
 if( flag==3218) then
     stop 'error 3218: input script error, output_freq command error'
 end if
-if( flag==3219) then
-    stop 'error 3219: input script error, angle_template command error'
-end if
-if( flag==3220) then
-    stop 'error 3219: input script error, angle_template command error'
-end if
 if( flag==3220) then
     stop 'error 3220: input script error, bond_template command error'
-end if
-if( flag==3221) then
-    stop 'error 3221: input script error, valency command error'
-end if
-if( flag==3222) then
-    stop 'error 3222: input script error, deform command error'
-end if
-if( flag==3223) then
-    stop 'error 3223: input script error, place command error'
 end if
 if( flag==3225) then
     stop 'error 3225: input script error, restart command error'
@@ -4014,9 +2728,7 @@ end if
 if( flag==340) then
     stop 'error 340:element type is not set'
 end if
-if( flag==341) then
-    stop 'error 341:input .mol file does not exist'
-end if
+write(*,*) 'error with flag', flag
 stop 'unspecified error'
 end
 
