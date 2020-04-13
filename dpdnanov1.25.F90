@@ -322,7 +322,7 @@ num_of_args = IARGC()
 if (num_of_args .ne. 2) stop 'Number of arguments not equals 2! The first one is filename, the second one is resolution. For example ". ./dpd name.geo 100000"'
 CALL GETARG (1,geo_file)
 CALL GETARG (2,resstr)
-read(resstr,'(i)') resolution
+read(resstr,'(I18)') resolution
 
 end
 
