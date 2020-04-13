@@ -486,7 +486,7 @@ do
 end do
 close(14, status = 'keep')
 !calculate the size of simulation box
-dlxa=((totalNumberOfChainBeads/3.)**(1./3.))*2+1
+dlxa=((totalNumberOfChainBeads/rho)**(1./3.))*2+1
 dlya=dlxa
 dlza=dlxa
 natmsall=dlxa**3*rho
@@ -526,7 +526,7 @@ iter=1
 do i=1,numberOfChr
     allocate(rxt(arrLengthsOfChains(i)),ryt(arrLengthsOfChains(i)),rzt(arrLengthsOfChains(i)))
     write(*,*) 'number of chr', i
-    call rndplace( arrLengthsOfChains(i),rxt,ryt,rzt,cn2,dlxa,dlya,dlza, 2 )
+    call rndplace( arrLengthsOfChains(i),rxt,ryt,rzt,cn2,(dlxa-1)**.5,(dlya-1)**.5,(dlza-1)**.5, 2 )
     rndposx = 0
     rndposy = 0
     rndposz = 0
@@ -2614,7 +2614,6 @@ do i = 1, nat-1
     !do k = 1, 2!cn(i,0)
 
         j = i+1
-
         ! don't move jth bead if it has already been moved 
         if (id(j)==-1) cycle
         dx = ( uni() - 0.5 )
@@ -2628,9 +2627,25 @@ do i = 1, nat-1
         dx = dx * scale
         dy = dy * scale
         dz = dz * scale
-        rxt(j)=rxt(i)+dx
-        ryt(j)=ryt(i)+dy
-        rzt(j)=rzt(i)+dz
+
+        if (rxt(i)+dx < dlxa .and. rxt(i)+dx > 0) then
+            rxt(j)=rxt(i)+dx
+        else
+            rxt(j)=rxt(i)-dx
+        end if
+
+        if (ryt(i) + dy < dlya .and. ryt(i) + dy > 0) then
+            ryt(j) = ryt(i) + dy
+        else
+            ryt(j) = ryt(i) - dy
+        end if
+
+        if (rzt(i) + dz < dlza .and. rzt(i) + dz > 0) then
+            rzt(j) = rzt(i) + dz
+        else
+            rzt(j) = rzt(i) - dz
+        end if
+
 		!write(*,*) dx, dy, dz, scale, r, place
         id(j) = -1
     !end do
