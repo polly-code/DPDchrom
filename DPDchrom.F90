@@ -8,7 +8,7 @@ common /sizes/ sz !size of main arrays (like r and v)
 common /bxsize/ ilx,ily,ilz !number of box bins 
 common /na/ natms,natmsfan !current number of "real" particles(natms), current number of right "ghost" particles
 common /nab/ natmsfanbond !current number of left "ghost" particles. necessary for bond forces calculation
-common /data/ alpha,sigma,gamma !dpd parameters 
+common /datatech/ alpha,sigma,gamma !dpd parameters 
 common /time/ dt ! timestep
 common /comm/ ssz,fsz !size of communication arrays, ssz is for moving atoms between nodes, fsz - for "ghost" atoms 
 common /npall/ npall !total number of atoms in the system
@@ -33,9 +33,10 @@ common /ptypeall/ kindpall !particle types
 common /top/ cln,nrow,ncol ! number of nodes in 1 row,row and column number of node
 common /prs/ press ! pressure
 common /vale/ val !valencies
-common /bmult/ mult !angles/bond snd rcv arrays size multiplier
+common /bmult/ mult !bond snd rcv arrays size multiplier
 common /lambd/ lambda
 common /bio_input/ resolution, geo_file, contacts ! input parameters
+common /reinit/ rein ! reinitialize variable for speeding up the calculations
 
 real*4,pointer :: sndr(:,:),sndl(:,:),fanl(:,:),fanr(:,:),rcv(:),rcvf(:) !size ssz,4;ssz,4;fsz,4;fsz,4;ssz*8,fsz*8
 real*4,pointer :: rx(:,:),ry(:,:),rz(:,:) ! size sz,3
@@ -78,6 +79,7 @@ real*4 press(3)
 real*4 lambda
 integer*8 resolution
 character*256 geo_file
+integer*4 rein
 
 ! MPI initialization
 call mpi_init(ierr)
@@ -110,7 +112,10 @@ call initial()
 
 ! output information
 if(rank==0) then
-    write(*,*) 'dpdnanov1.25k'
+    write(*,*)
+    write(*,*) '*********************************************'
+    write(*,*)
+    write(*,*) '             DPDchrom'
     write(*,*)
     write(*,*) 'Some technical information'
     write(*,*) 'Number of nodes              :',nproc
@@ -138,18 +143,22 @@ if(rank==0) then
     end do
 
     write(*,*)
+    write(*,*) '*********************************************'
+    write(*,*)
 end if
 
 ! calculate forces
 fsend=0
 call forces()
 call forcesbond()
+
 if (rank==0) start=mpi_wtime()
 
 ! start 1st stage with soft potentials
 alpha=alpha/5.0
 k_bond=k_bond/5.0
-dt=0.0001 !timestep for equilibration
+dt=dt/10 !timestep for equilibration
+rein=1 ! reinit all variables with dt
 do nstp=1,steps1 ! stage 1 - equilibration 
     
     ! integrate beads positions and velocities
@@ -172,7 +181,8 @@ do nstp=1,steps1 ! stage 1 - equilibration
         vall(2)=sum(vy)
         vall(3)=sum(vz)
         call gsum(vall,3)
-        if (rank==0) write(*,*)'stage 1', nstp,vl,maxval(abs(vall))
+        call pressure()
+        if (rank==0) write(*,*)'stage 1', nstp,vl,maxval(abs(vall)),sum(press)/3.0
     end if
     
     ! control  CM velocily
@@ -182,10 +192,10 @@ end do
 ! finish 1st pahse
 alpha=alpha*5.0
 k_bond=k_bond*5.0
-dt=0.04
+dt=dt*10
+rein=1 ! reinit all variables with dt
 ! output time
 if (rank==0) write(*,*) 'stage 1 took',mpi_wtime()-start,'s'
-
 ! start 2nd stage - calculation
 if (rank==0) start=mpi_wtime()
 do nstp=1,steps2
@@ -214,6 +224,7 @@ do nstp=1,steps2
         if (rank==0) write(*,*)'stage 2', nstp,vl,maxval(abs(vall)),sum(press)/3.0
     end if
 
+    if (mod(nstp,10000)==0) call writerst()
     ! control  CM velocily
     if (mod(nstp,100)==0) call vcontrol()
 end do
@@ -231,75 +242,6 @@ nullify(rx,ry,rz,vwx,vwy,vwz,fx,fy,fz,vx,vy,vz,kindp,corr,bcorr,bcorrt,sndr,sndl
 
 ! end mpi
 call mpi_finalize(ierr)
-
-end
-
-real*4 function uni()
-! #####################################################################
-! #                                                                   #
-! #   function 5:                                                     #
-! # random number generator based on the universal random number      #
-! # generator of marsaglia, zaman and tsang                           #
-! # (stats and prob. lett. 8 (1990) 35-39.)                           #
-! #                                                                   #
-! # it must be called once to initialise parameters u,c,cd,cm         #
-! #                                                                   #
-! #####################################################################
-implicit none
-
-common /mpidpd/ rank, nproc
-logical,save :: init
-data init /.true./
-integer,save :: ir,jr
-integer i,ii,j,jj,k,l,m,idnode
-real*8,save :: c,cd,cm,u(1:97)
-real*8 s,t
-integer*4 nproc,rank
-      
-
-! initialise parameters u,c,cd,cm
-if (init) then
-    init = .false.
-
-! initial values of i,j,k must be in range 1 to 178 (not all 1)
-! initial value of l must be in range 0 to 168
-    i = mod(rank,166) + 12
-    j = mod(rank,144) + 34
-    k = mod(rank,122) + 56
-    l = mod(rank,90)  + 78
-    ir = 97
-    jr = 33
-    do ii=1,97
-        s = 0.0d0
-        t = 0.5d0
-        do jj=1,24
-            m = mod(mod(i*j,179)*k,179)
-            i = j
-            j = k
-            k = m
-            l = mod(53*l+1,169)
-            if (mod(l*m,64)>=32) s = s+t
-            t = 0.5d0*t
-        end do
-        u(ii)=s
-    end do
-    c  =   362436.0d0/16777216.0d0
-    cd =  7654321.0d0/16777216.0d0
-    cm = 16777213.0d0/16777216.0d0
-end if
-
-! calculate random number
-uni=u(ir)-u(jr)
-if (uni < 0.0d0) uni = uni + 1.0d0
-u(ir)=uni
-ir=ir-1
-if (ir == 0) ir = 97
-jr=jr-1
-if (jr == 0) jr = 97
-c = c-cd
-if (c < 0.0d0) c = c+cm
-uni = uni-c
-if (uni < 0.0d0) uni = uni + 1.0d0
 
 end
 
@@ -525,22 +467,19 @@ iter=1
 
 do i=1,numberOfChr
     allocate(rxt(arrLengthsOfChains(i)),ryt(arrLengthsOfChains(i)),rzt(arrLengthsOfChains(i)))
-    write(*,*) 'number of chr', i
-    call rndplace( arrLengthsOfChains(i),rxt,ryt,rzt,cn2,(dlxa-1)**.5,(dlya-1)**.5,(dlza-1)**.5, 2 )
+    call rndplace( arrLengthsOfChains(i),rxt,ryt,rzt,cn2,(dlxa-1)/2,(dlya-1)/2,(dlza-1)/2, 2 )
     rndposx = 0
     rndposy = 0
     rndposz = 0
     do j=1,arrLengthsOfChains(i)
-        write(3,'(i8,2i4,3f14.6)')iter, zero, one, rxt(j), ryt(j), rzt(j)
+        write(3,'(i8,2i4,3f14.6)')iter, zero, one, rxt(j)+3, ryt(j)+3, rzt(j)+3
         iter=iter+1
     end do
     nullify(rxt,ryt,rzt)
 end do
+
 do i=1,totalNumberOfSolvent
-    rndposx=dlxa*uni()
-    rndposy=dlya*uni()
-    rndposz=dlza*uni()
-    write(3,'(i8,2i4,3f14.6)')iter, zero, two, rndposx, rndposy, rndposz
+    write(3,'(i8,2i4,3f14.6)')iter, zero, two, dlxa*(uni()), dlya*(uni()), dlza*(uni())
     iter=iter+1
 end do
 
@@ -549,7 +488,7 @@ write(3,'(a9,i9)') ' bonds:  ',nbondsall
 do i=1,nbondsall
     write(3,'(2i8)') contacts(i,1), contacts(i,2)
 end do
-!write(3,'(a9,i9)') ' angles:  ',zero
+write(3,'(a9,i9)') ' angles:  ',zero
 close(3)
 end
 
@@ -867,14 +806,15 @@ subroutine fcdrij (i,j,rsq,xd,yd,zd,arrtype)
 implicit none
 save
 
-common /data/ alpha,sigma,gamma
+common /datatech/ alpha,sigma,gamma
 common /time/ dt
 common /sizes/ sz
 common /fxyz/ fx,fy,fz
 common /vwxyz/ vwx,vwy,vwz
 common /ptype/ kindp
 common /commf/ fsend,rcou
-common /prs/ press 
+common /prs/ press
+common /reinit/ rein
 
 real*4,pointer :: vwx(:,:),vwy(:,:),vwz(:,:) 
 real*4,pointer :: fx(:),fy(:),fz(:)
@@ -894,13 +834,15 @@ integer*4 arrtype,nfi,nfj
 integer*4 i,j
 real*4 press(3)
 logical init/.true./
+integer*4 rein
 
 ! set initial values
-if (init) then
+if (init .or. rein==1) then
     init = .false.
     rfac=sqrt(3.d0) 
     dt2inv=sigma*rfac/sqrt(dt)
 end if
+
 
 ! calculate distance between particles
 rij=sqrt(rsq)  
@@ -1036,6 +978,75 @@ fsend=0
 
 end
 
+real*4 function uni()
+! #####################################################################
+! #                                                                   #
+! #   function 5:                                                     #
+! # random number generator based on the universal random number      #
+! # generator of marsaglia, zaman and tsang                           #
+! # (stats and prob. lett. 8 (1990) 35-39.)                           #
+! #                                                                   #
+! # it must be called once to initialise parameters u,c,cd,cm         #
+! #                                                                   #
+! #####################################################################
+implicit none
+
+common /mpidpd/ rank, nproc
+logical,save :: init
+data init /.true./
+integer,save :: ir,jr
+integer i,ii,j,jj,k,l,m,idnode
+real*8,save :: c,cd,cm,u(1:97)
+real*8 s,t
+integer*4 nproc,rank
+      
+
+! initialise parameters u,c,cd,cm
+if (init) then
+    init = .false.
+
+! initial values of i,j,k must be in range 1 to 178 (not all 1)
+! initial value of l must be in range 0 to 168
+    i = mod(rank,166) + 12
+    j = mod(rank,144) + 34
+    k = mod(rank,122) + 56
+    l = mod(rank,90)  + 78
+    ir = 97
+    jr = 33
+    do ii=1,97
+        s = 0.0d0
+        t = 0.5d0
+        do jj=1,24
+            m = mod(mod(i*j,179)*k,179)
+            i = j
+            j = k
+            k = m
+            l = mod(53*l+1,169)
+            if (mod(l*m,64)>=32) s = s+t
+            t = 0.5d0*t
+        end do
+        u(ii)=s
+    end do
+    c  =   362436.0d0/16777216.0d0
+    cd =  7654321.0d0/16777216.0d0
+    cm = 16777213.0d0/16777216.0d0
+end if
+
+! calculate random number
+uni=u(ir)-u(jr)
+if (uni < 0.0d0) uni = uni + 1.0d0
+u(ir)=uni
+ir=ir-1
+if (ir == 0) ir = 97
+jr=jr-1
+if (jr == 0) jr = 97
+c = c-cd
+if (c < 0.0d0) c = c+cm
+uni = uni-c
+if (uni < 0.0d0) uni = uni + 1.0d0
+
+end
+
  subroutine intr()
 ! #################################################################
 ! #                                                               #
@@ -1064,6 +1075,7 @@ common /sndrcv/ sndr,sndl,fanl,fanr,rcv,rcvf
 common /funnumb/ npl,fann
 common /shwi/ shwi
 common /lambd/ lambda
+common /reinit/ rein
 
 integer*4 sz,ssz,fsz,npall
 
@@ -1088,9 +1100,10 @@ integer*4 npl(4)
 integer*4 neinumb(2),neilist(4,2)
 real*4 rxres(4,2),ryres(4,2)
 logical init/.true./
+integer*4 rein
 
 ! set initial values
-if (init) then
+if (init .or. rein==1) then
       dtlam = lambda*dt
       dt2 = 0.50*dt
       init=.false.
@@ -1731,16 +1744,19 @@ common /fxyz/ fx,fy,fz
 common /vxyz/ vx,vy,vz
 common /time/ dt
 common /na/ natms,natmsfan
+common /reinit/ rein
 real*4,pointer :: fx(:),fy(:),fz(:) ! size sz
 real*4,pointer :: vx(:),vy(:),vz(:) ! size sz 
 real*4 dt,dt2
 integer*4 i,natms,natmsfan
 logical init/.true./
+integer*4 rein
 
 ! set initial value
-if (init) then
+if (init .or. rein==1) then
     dt2 = 0.50*dt
     init=.false.
+    rein=0
 end if
       
 ! integrate velocities
@@ -1842,9 +1858,9 @@ ily=int(dly/rcut)
 ilz=int(dlz/rcut)
 
 ! sizes of arrays
-sz=max0(int(dlz*dly*dlx*rho*3),int(3*(2*dlz*rho*dlx*shwi+2*dlz*rho*dly*shwi+4*dlz*rho*shwi*shwi)))
-ssz=max0(int(shwi*dly*dlz*11*rho),int(shwi*dlx*dlz*11*rho))
-fsz=max0(int(shwi*dly*dlz*8*3*rho),int(shwi*dlx*dlz*8*3*rho))
+sz=2*max0(int(dlz*dly*dlx*rho*3),int(3*(2*dlz*rho*dlx*shwi+2*dlz*rho*dly*shwi+4*dlz*rho*shwi*shwi)))
+ssz=2*max0(int(shwi*dly*dlz*11*rho),int(shwi*dlx*dlz*11*rho))
+fsz=2*max0(int(shwi*dly*dlz*8*3*rho),int(shwi*dlx*dlz*8*3*rho))
 
 ! allocate arrays
 allocate (rx(sz,3),ry(sz,3),rz(sz,3),vx(sz),vy(sz),vz(sz))
@@ -1873,16 +1889,18 @@ typelist=0
 ! add fix: type 1 - chain, boxsize = dlxa/2-1; type 2 - solvent, boxsize = dlxa
 do i = 1, npall
     read(1,'(i8,2i4,3f14.6)', err=10, end=10)corrb,valb,kindpb,rxb,ryb,rzb
-    if (kindpb==1) then
-        if (rxb>(dlxa/2-1)) rxb=rxb-int(rxb/(dlxa/2-1))*(dlxa/2-1)
-        if (rxb<0) rxb=rxb+(dlxa/2-1)*(abs(int(rxb/(dlxa/2-1)))+1)
-        if (ryb>(dlya/2-1)) ryb=ryb-int(ryb/(dlya/2-1))*(dlya/2-1)
-        if (ryb<0) ryb=ryb+(dlya/2-1)*(abs(int(ryb/(dlya/2-1)))+1)
-        if (rzb>(dlza/2-1)) rzb=rzb-int(rzb/(dlza/2-1))*(dlza/2-1)
-        if (rzb<0) rzb=rzb+(dlza/2-1)*(abs(int(rzb/(dlza/2-1)))+1)
-        kindpall(corrb)=kindpb
-        val(corrb)=valb
-    else if (kindpb==2) then
+
+        ! move current bead inside the simulation box
+    !if (kindpb==1) then
+     !   if (rxb>(dlxa/2-1)) rxb=rxb-int(rxb/(dlxa/2-1))*(dlxa/2-1)
+      !  if (rxb<0) rxb=rxb+(dlxa/2-1)*(abs(int(rxb/(dlxa/2-1)))+1)
+       ! if (ryb>(dlya/2-1)) ryb=ryb-int(ryb/(dlya/2-1))*(dlya/2-1)
+        !if (ryb<0) ryb=ryb+(dlya/2-1)*(abs(int(ryb/(dlya/2-1)))+1)
+        !if (rzb>(dlza/2-1)) rzb=rzb-int(rzb/(dlza/2-1))*(dlza/2-1)
+        !if (rzb<0) rzb=rzb+(dlza/2-1)*(abs(int(rzb/(dlza/2-1)))+1)
+        !kindpall(corrb)=kindpb
+        !val(corrb)=valb
+    if (kindpb==1 .or. kindpb==2) then
         if (rxb>dlxa) rxb=rxb-int(rxb/dlxa)*dlxa
         if (rxb<0) rxb=rxb+dlxa*(abs(int(rxb/dlxa))+1)
         if (ryb>dlya) ryb=ryb-int(ryb/dlya)*dlya
@@ -1894,9 +1912,6 @@ do i = 1, npall
     else
         stop 'Type of the bead does not equal 1 or 2. Check the restart.dat file.'
     end if
-
-    ! move current bead inside the simulation box
-    
   
     ! obtain list of avaliable beads types
     do j = 1, ntype
@@ -2031,11 +2046,11 @@ integer*1,pointer :: kindpall(:)
 
 if (nbond==0) return
 
-! allocate send/recieve arrays for bonds and angles calculation
+! allocate send/recieve arrays for bonds calculation
 if (init) then
     init=.false.
     arrsize=mult*int(18*(2*dlx*dlz+2*dly*dlz)/(shwi**2))
-    allocate( mb(sz*mult,2),rcount(nproc),displ(nproc),sndb(arrsize),rcvb(nproc*arrsize) )
+    allocate( mb(sz,2),rcount(nproc),displ(nproc),sndb(arrsize),rcvb(nproc*arrsize) )
 end if
 
 ! zero arrays
@@ -2190,7 +2205,6 @@ do i=0,allnum-1,4
     mbnum=mbnum-shft
 end do
 if (mbnum/=0) then
-    write(*,*) 'mbnum = ', mbnum
     call error(161)
 end if
 
@@ -2261,7 +2275,7 @@ real*4 dlxa,dlya,dlza
 integer*4 npall,kpbc,natms,natmsfan
 integer*4 rank,nproc,cln,nrow,ncol
 integer*4 i,j,ip,nre,ipos
-integer*4 nbond
+integer*4 nbond,nangles
 real*4 rho
 character*16 cre
 integer b
@@ -2280,6 +2294,7 @@ integer*1,pointer :: kindpall(:)
 if (init) then
     init=.false.
     nre=0
+    nangles=0
 end if
 
 ! calculate current restart file number
@@ -2319,6 +2334,9 @@ if (rank==0) then
             if(i<cn(i,j)) write(11,'(2i8)') i, cn(i,j)
         end do    
     end do
+
+        ! write angles
+    write(11,'(a9,i9)') ' angles: ',nangles
     close(11, status = 'keep')
 end if
 
@@ -2390,7 +2408,7 @@ rzb=rz(i,1)-rz(j,arrtype)
 
 ! apply PBC
 rxb=rxb-dlxa*nint(rxb/dlxa)
-ryb=ryb-dlya*nint(rzb/dlya)
+ryb=ryb-dlya*nint(ryb/dlya)
 rzb=rzb-dlza*nint(rzb/dlza)
 
 rij=rxb**2+ryb**2+rzb**2
@@ -2448,7 +2466,7 @@ implicit none
 
 common /cella/ dlxa,dlya,dlza 
 common /den/ rho 
-common /data/ alpha,sigma,gamma
+common /datatech/ alpha,sigma,gamma
 common /time/ dt
 common /shwi/ shwi
 common /mpidpd/ rank, nproc 
@@ -2481,7 +2499,7 @@ shwi=1.0
 steps1=1000
 steps2=100000
 spnum=0
-mult=100
+mult=5
 dt=0.04
 qstp=1000
 atempl=0
@@ -2494,9 +2512,10 @@ k_bond=40.0
 lambda=0.65
 
 alpha(1,2)=26.75
+alpha(2,1)=26.75
 rho=3.0
-bead_type(1)='  C'
-bead_type(2)='  O'
+bead_type(1)='C'
+bead_type(2)='O'
 
 
 gamma=0.50*sigma*sigma
