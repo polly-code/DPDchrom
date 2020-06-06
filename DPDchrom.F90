@@ -1,3 +1,4 @@
+
 implicit none
 include "mpif.h"
 
@@ -187,11 +188,79 @@ do nstp=1,steps1 ! stage 1 - equilibration
     ! control  CM velocily
     if (mod(nstp,100)==0) call vcontrol()
 end do
-
-! finish 1st pahse
+rein = 1
 alpha=alpha*5.0
+
+if (rank==0) write(*,*) 'stage 1 took',mpi_wtime()-start,'s'
+! start 2nd stage - calculation
+if (rank==0) start=mpi_wtime()
+
+do nstp=1,steps1 ! stage 1 - equilibration 
+    
+    ! integrate beads positions and velocities
+    call intr()
+
+    ! calculate forces
+    call forces()
+    call forcesbond()
+
+    ! integrate beads velocoties
+    call intv()
+    
+    ! control output
+    if (mod(nstp,qstp)==0) then
+        vl=(sum(vz*vz)+sum(vy*vy)+sum(vx*vx))
+        vl=vl/natms/3
+        call gsum(vl,1)
+        vl=vl/nproc
+        vall(1)=sum(vx)
+        vall(2)=sum(vy)
+        vall(3)=sum(vz)
+        call gsum(vall,3)
+        call pressure()
+        if (rank==0) write(*,*)'stage 1', nstp,vl,maxval(abs(vall)),sum(press)/3.0
+    end if
+    
+    ! control  CM velocily
+    if (mod(nstp,100)==0) call vcontrol()
+end do
+! finish 1st pahse
 k_bond=k_bond*5.0
-dt=dt*10
+rein = 1
+if (rank==0) write(*,*) 'stage 1 took',mpi_wtime()-start,'s'
+! start 2nd stage - calculation
+if (rank==0) start=mpi_wtime()
+
+do nstp=1,steps1 ! stage 1 - equilibration 
+    
+    ! integrate beads positions and velocities
+    call intr()
+
+    ! calculate forces
+    call forces()
+    call forcesbond()
+
+    ! integrate beads velocoties
+    call intv()
+    
+    ! control output
+    if (mod(nstp,qstp)==0) then
+        vl=(sum(vz*vz)+sum(vy*vy)+sum(vx*vx))
+        vl=vl/natms/3
+        call gsum(vl,1)
+        vl=vl/nproc
+        vall(1)=sum(vx)
+        vall(2)=sum(vy)
+        vall(3)=sum(vz)
+        call gsum(vall,3)
+        call pressure()
+        if (rank==0) write(*,*)'stage 1', nstp,vl,maxval(abs(vall)),sum(press)/3.0
+    end if
+    
+    ! control  CM velocily
+    if (mod(nstp,100)==0) call vcontrol()
+end do
+dt=dt*5
 rein=1 ! reinit all variables with dt
 ! output time
 if (rank==0) write(*,*) 'stage 1 took',mpi_wtime()-start,'s'
@@ -288,7 +357,7 @@ real*4,pointer :: rxt(:),ryt(:),rzt(:)
 character*32 :: chrName(100)
 
 integer*8 resolution
-integer*8 pos1,pos2
+integer*8 pos1start, pos1end, pos2start, pos2end, pos1, pos2
 integer*4 nlines
 integer*4 numberOfChr, iter
 integer*4 zero, one, two
@@ -323,7 +392,9 @@ do
         read(14,'(a)') trash_line
         cycle
     end if
-    read(14,*,iostat=reason)chr1,chr2,pos1,pos2,strand1,strand2
+    read(14,*,iostat=reason)chr1, chr2, pos1start, pos1end, pos2start, pos2end
+    pos1 = (pos1start + pos1end) / 2
+    pos2 = (pos2start + pos2end) / 2
     if (reason>0) then
         stop 'something wrong with the file geo'
     else if (reason<0) then !end of file
@@ -373,8 +444,9 @@ contacts=0
 iter=1
 iter2=1
 
+!add linear bonds
 do i=1,numberOfChr
-write(*,*)'Length of chromosome',i,arrLengthsOfChains(i)
+write(*,*)'Length of chromosome',i,chrName(i),arrLengthsOfChains(i)
     do j=1,arrLengthsOfChains(i)-1
         contacts(iter,1)=iter2
         contacts(iter,2)=iter2+1
@@ -385,9 +457,10 @@ write(*,*)'Length of chromosome',i,arrLengthsOfChains(i)
 end do
 
 skip_1st_line=.true.
-iter2=iter-1
+iter2=iter
 allocate(preset(numberOfChr))
 
+!cumulative length of chromosomes
 preset(1)=0
 do i=2,numberOfChr
     preset(i)=sum(arrLengthsOfChains(1: i-1))
@@ -399,7 +472,9 @@ do
         read(14,'(a)') trash_line
         cycle
     end if
-    read(14,*,iostat=reason)chr1,chr2,pos1,pos2,strand1,strand2
+    read(14,*,iostat=reason)chr1, chr2, pos1start, pos1end, pos2start, pos2end
+    pos1 = (pos1start + pos1end) / 2
+    pos2 = (pos2start + pos2end) / 2
     if (reason>0) then
         stop 'something wrong with the file geo'
     else if (reason<0) then !end of file
@@ -422,7 +497,6 @@ do
             contacts(iter,2)=globalPos2
             iter=iter+1
         end if
-        firstFlag=.true.
     end if
 end do
 close(14, status = 'keep')
@@ -1859,7 +1933,7 @@ ilz=int(dlz/rcut)
 ! sizes of arrays
 sz=2*max0(int(dlz*dly*dlx*rho*3),int(3*(2*dlz*rho*dlx*shwi+2*dlz*rho*dly*shwi+4*dlz*rho*shwi*shwi)))
 ssz=2*max0(int(shwi*dly*dlz*11*rho),int(shwi*dlx*dlz*11*rho))
-fsz=2*max0(int(shwi*dly*dlz*8*3*rho),int(shwi*dlx*dlz*8*3*rho))
+fsz=4*max0(int(shwi*dly*dlz*8*3*rho),int(shwi*dlx*dlz*8*3*rho))
 
 ! allocate arrays
 allocate (rx(sz,3),ry(sz,3),rz(sz,3),vx(sz),vy(sz),vz(sz))
@@ -2772,7 +2846,7 @@ subroutine gsum(arr,n)
 ! #    subroutine 38:                                             #
 ! #    shortcut to mpi_allreduce                                  #
 ! #                                                               #
-! ################################################################# 
+! #################################################################
 implicit none
 include 'mpif.h'
      
