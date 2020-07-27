@@ -439,7 +439,7 @@ do i=1,numberOfChr
     arrLengthsOfChains(i)=CEILING(real(maxChrLength(i)-minChrLength(i))/real(resolution))
 end do
 totalNumberOfChainBeads = sum(arrLengthsOfChains)
-allocate(contacts(totalNumberOfChainBeads**2,2))
+allocate(contacts(totalNumberOfChainBeads*10,2))
 contacts=0
 iter=1
 iter2=1
