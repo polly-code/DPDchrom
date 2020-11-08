@@ -364,9 +364,10 @@ integer*4 zero, one, two
 integer*4 i,j, i1, i2,nbmax2,natmsall,nbondsall
 integer*4 totalNumberOfSolvent,totalNumberOfChainBeads
 integer*4 globalPos1, globalPos2, reason, iter2, empt_var
-real*4 dlxa,dlya,dlza, rho
+real*4 dlxa,dlya,dlza, rho, 
 real*4 rndposx, rndposy, rndposz
 real*4 uni
+real*4 ncpm !number of contact per monomer
 character*32 chr1,chr2
 character*32 strand1,strand2
 character*256 geo_file, trash_line, test_line(6)
@@ -511,10 +512,16 @@ allocate(cn2(natmsall,0:0))
 cn2=0
 nbondsall=iter-1
 do i = 1, nbondsall
-
     cn2(contacts(i,1),0)=cn2(contacts(i,1),0)+1
     cn2(contacts(i,2),0)=cn2(contacts(i,2),0)+1
 end do
+
+ncpm = real(totalNumberOfChainBeads) / real(nbondsall - totalNumberOfChainBeads + numberOfChr)
+if (ncpm < 0.975) then
+	write (*,*) 'Expected accuracy is.........', 96.58-60.75*exp(-ncpm/0.32), '%'
+else
+	write (*,*) 'Expected accuracy is.........', 93.69, '% (technical limit)'
+end if
 
 nbmax2=maxval(cn2(:,0))
 nullify (cn2)
