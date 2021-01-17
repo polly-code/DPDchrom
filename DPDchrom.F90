@@ -364,7 +364,7 @@ integer*4 zero, one, two
 integer*4 i,j, i1, i2,nbmax2,natmsall,nbondsall
 integer*4 totalNumberOfSolvent,totalNumberOfChainBeads
 integer*4 globalPos1, globalPos2, reason, iter2, empt_var
-real*4 dlxa,dlya,dlza, rho, 
+real*4 dlxa,dlya,dlza, rho
 real*4 rndposx, rndposy, rndposz
 real*4 uni
 real*4 ncpm !number of contact per monomer
