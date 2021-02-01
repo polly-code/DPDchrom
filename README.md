@@ -8,6 +8,7 @@ DPDchrom is developed to reconstruct 3D chromatin conformation using single cell
 
 To install DPDchrom, put in the same folder makefile and DPDchrom.f90, then compile the fortran code with any fortran compiler, simply type 
 > make
+
 DPDchrom is ready to run.
 
 ## How to use
