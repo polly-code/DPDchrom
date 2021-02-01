@@ -31,4 +31,4 @@ To compare your structures with each other, please, use script **imj_acc.py** as
 
 ## Spin-off
 
-In the folder cmd you can find input for CMD calculations for lammps engine.
+In the folder cmd you can find input for CMD calculations for the LAMMPS.
