@@ -2,7 +2,7 @@
 
 ## General description
 
-DPDchrom is developed to reconstruct 3D chromatin conformation using single cell Hi-C contact map. This method is based on DPD [1]. Previous version with manual preparation published [2] and available [here](https://github.com/polly-code/DPD_withRemovingBonds). It means that thermostat is embedded into a motion calculation. Solvent is taken into account explicitly. Due to the soft repultion, one can use large integration time step, dt=0.04. This software takes contact matrix as an input and produces chromatin conformation as an output.
+DPDchrom is developed to reconstruct 3D chromatin conformation using single cell Hi-C contact map. This method is based on DPD [1](#references). Previous version with manual preparation published [2] and available [here](https://github.com/polly-code/DPD_withRemovingBonds). It means that thermostat is embedded into a motion calculation. Solvent is taken into account explicitly. Due to the soft repultion, one can use large integration time step, dt=0.04. This software takes contact matrix as an input and produces chromatin conformation as an output.
 
 ## Installation
 
@@ -35,6 +35,6 @@ In the folder **cmd** you can find input for CMD calculations in [LAMMPS](https:
 
 ## References
 
-[1]. Groot, Robert D., and Patrick B. Warren. "Dissipative particle dynamics: Bridging the gap between atomistic and mesoscopic simulation." The Journal of chemical physics 107.11 (1997): 4423-4435.
-[2]. Ulianov, Sergey V., et al. "Order and stochasticity in the folding of individual Drosophila genomes." Nature Communications 12.1 (2021): 1-17.
-[3]. Flyamer, Ilya M., et al. "Single-nucleus Hi-C reveals unique chromatin reorganization at oocyte-to-zygote transition." Nature 544.7648 (2017): 110-114.
+1. Groot, Robert D., and Patrick B. Warren. "Dissipative particle dynamics: Bridging the gap between atomistic and mesoscopic simulation." The Journal of chemical physics 107.11 (1997): 4423-4435.
+2. Ulianov, Sergey V., et al. "Order and stochasticity in the folding of individual Drosophila genomes." Nature Communications 12.1 (2021): 1-17.
+3. Flyamer, Ilya M., et al. "Single-nucleus Hi-C reveals unique chromatin reorganization at oocyte-to-zygote transition." Nature 544.7648 (2017): 110-114.
