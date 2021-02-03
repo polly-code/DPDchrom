@@ -19,7 +19,7 @@ In the test folder there is an example of input `37420_*.csv` [[3](#references)]
 
 `1,1,3200000,3400000,3200000,3400000,1`
 
-To perform calculations execute DPDchrom in the command line passing two arguments, _/path/to/file_ and _100000_ resolution in bp. Example of the command to reconstruct conformation using file `myfile` at resolution _100 Kb_:
+To perform calculations execute DPDchrom in the command line passing two arguments, _/path/to/file_ and resolution in bp. Example of the command to reconstruct conformation using file `myfile` at resolution _100 Kb_:
 
 > ./DPDchrom /home/work/myfile 100000
 
