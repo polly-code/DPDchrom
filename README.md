@@ -35,6 +35,6 @@ In the folder **cmd** you can find input for CMD calculations in [LAMMPS](https:
 
 ## References
 
-1. Groot, Robert D., and Patrick B. Warren. "Dissipative particle dynamics: Bridging the gap between atomistic and mesoscopic simulation." The Journal of chemical physics 107.11 (1997): 4423-4435.
-2. Ulianov, Sergey V., et al. "Order and stochasticity in the folding of individual Drosophila genomes." Nature Communications 12.1 (2021): 1-17.
-3. Flyamer, Ilya M., et al. "Single-nucleus Hi-C reveals unique chromatin reorganization at oocyte-to-zygote transition." Nature 544.7648 (2017): 110-114.
+[1]. Groot, Robert D., and Patrick B. Warren. "Dissipative particle dynamics: Bridging the gap between atomistic and mesoscopic simulation." The Journal of chemical physics 107.11 (1997): 4423-4435.
+[2]. Ulianov, Sergey V., et al. "Order and stochasticity in the folding of individual Drosophila genomes." Nature Communications 12.1 (2021): 1-17.
+[3]. Flyamer, Ilya M., et al. "Single-nucleus Hi-C reveals unique chromatin reorganization at oocyte-to-zygote transition." Nature 544.7648 (2017): 110-114.
