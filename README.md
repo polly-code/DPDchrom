@@ -19,7 +19,7 @@ In the test folder you can find example of the input **37420_*.csv** [3]. The fo
 
 > 1,1,3200000,3400000,3200000,3400000,1
 
-To perform calculations execute DPDchrom in the command line passing two arguments: "/path/to/file" and resolution in bp "100000". Example of the command to reconstruct conformation using file **myfile** at resolution **100 Kb**:
+To perform calculations execute DPDchrom in the command line passing two arguments, _/path/to/file_ and _100000_ resolution in bp. Example of the command to reconstruct conformation using file **myfile** at resolution **100 Kb**:
 
 > ./DPDchrom /home/work/myfile 100000
 
@@ -31,7 +31,7 @@ To compare your structures with each other, please, use script **imj_acc.py** as
 
 ## Spin-off
 
-In the folder cmd you can find input for CMD calculations for the LAMMPS.
+In the folder **cmd** you can find input for CMD calculations in [LAMMPS](https://github.com/lammps/lammps).
 
 ## References
 
