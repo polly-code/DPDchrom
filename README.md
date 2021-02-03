@@ -2,7 +2,7 @@
 
 ## General description
 
-DPDchrom is developed to reconstruct 3D chromatin conformation using single cell Hi-C contact map. This method is based on DPD [1](#references). Previous version with manual preparation published [2] and available [here](https://github.com/polly-code/DPD_withRemovingBonds). It means that thermostat is embedded into a motion calculation. Solvent is taken into account explicitly. Due to the soft repultion, one can use large integration time step, dt=0.04. This software takes contact matrix as an input and produces chromatin conformation as an output.
+DPDchrom is developed to reconstruct 3D chromatin conformation using single cell Hi-C contact map. This method is based on DPD [[1](#references)]. Previous version with manual preparation published [[2](#references)] and available [here](https://github.com/polly-code/DPD_withRemovingBonds). It means that thermostat is embedded into a motion calculation. Solvent is taken into account explicitly. Due to the soft repultion, one can use large integration time step, dt=0.04. This software takes contact matrix as an input and produces chromatin conformation as an output.
 
 ## Installation
 
@@ -13,7 +13,7 @@ DPDchrom is ready to run.
 
 ## How to use
 
-In the test folder you can find example of the input **37420_*.csv** [3]. The format of the file is: 
+In the test folder you can find example of the input **37420_*.csv** [[3](#references)]. The format of the file is: 
 
 > chr1,chr2,start1,end1,start2,end2,count
 
