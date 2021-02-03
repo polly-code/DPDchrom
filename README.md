@@ -6,32 +6,32 @@ DPDchrom is developed to reconstruct 3D chromatin conformation using single cell
 
 ## Installation
 
-To install DPDchrom, put in the same folder makefile and DPDchrom.f90, then compile the fortran code with any fortran compiler, simply type 
+To install DPDchrom, put in the same folder `makefile` and `DPDchrom.f90`, then compile the fortran code with any fortran compiler, simply type 
 > make
 
 DPDchrom is ready to run.
 
 ## How to use
 
-In the test folder you can find example of the input **37420_*.csv** [[3](#references)]. The format of the file is: 
+In the test folder there is an example of input `37420_*.csv` [[3](#references)]. The format of the file is: 
 
-> chr1,chr2,start1,end1,start2,end2,count
+`chr1,chr2,start1,end1,start2,end2,count`
 
-> 1,1,3200000,3400000,3200000,3400000,1
+`1,1,3200000,3400000,3200000,3400000,1`
 
-To perform calculations execute DPDchrom in the command line passing two arguments, _/path/to/file_ and _100000_ resolution in bp. Example of the command to reconstruct conformation using file **myfile** at resolution **100 Kb**:
+To perform calculations execute DPDchrom in the command line passing two arguments, _/path/to/file_ and _100000_ resolution in bp. Example of the command to reconstruct conformation using file `myfile` at resolution _100 Kb_:
 
 > ./DPDchrom /home/work/myfile 100000
 
 ## Postprocessing
 
-After simulation you will have your structure in unknown format. You can use script **rst2mol2.py** from py_script folder to convert it into **mol2** format. Moreover you can also remove periodic boundary conditions properly.
+The format of output file with conformation is customed. In order to convert it to _mol2_ format, there is a script `rst2mol2.py` in _py_script_ folder. Moreover there is an opportunity to remove periodic boundary conditions properly.
 
-To compare your structures with each other, please, use script **imj_acc.py** as template. It allows you to calculate accuracy (Modified Jaccard Index).
+To compare structures with each other, there is a script `imj_acc.py` provided as a template to calculate similarity (reconstruction accuracy) as Modified Jaccard Index.
 
 ## Spin-off
 
-In the folder **cmd** you can find input for CMD calculations in [LAMMPS](https://github.com/lammps/lammps).
+In the folder _cmd_ you can find input files for CMD calculations in [LAMMPS](https://github.com/lammps/lammps).
 
 ## References
 
