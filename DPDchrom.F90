@@ -35,7 +35,7 @@ common /prs/ press ! pressure
 common /vale/ val !valencies
 common /bmult/ mult !bond snd rcv arrays size multiplier
 common /lambd/ lambda
-common /bio_input/ resolution, geo_file, contacts ! input parameters
+common /bio_input/ resolution, geo_file, contacts, def_chr_len ! input parameters
 common /reinit/ rein ! reinitialize variable for speeding up the calculations
 
 real*4,pointer :: sndr(:,:),sndl(:,:),fanl(:,:),fanr(:,:),rcv(:),rcvf(:) !size ssz,4;ssz,4;fsz,4;fsz,4;ssz*8,fsz*8
@@ -77,7 +77,7 @@ integer*1 typelist(10),ntype
 integer*4 i,j,curdef
 real*4 press(3)
 real*4 lambda
-integer*8 resolution
+integer*8 resolution, def_chr_len
 character*256 geo_file
 integer*4 rein
 
@@ -322,17 +322,19 @@ subroutine read_from_command_line()
 ! #####################################################################
 implicit none
 save
-common /bio_input/ resolution, geo_file, contacts ! input parameters
+common /bio_input/ resolution, geo_file, contacts, def_chr_len ! input parameters
 
 character*256 geo_file, resstr
-integer*8 resolution, num_of_args
+integer*8 resolution, num_of_args, def_chr_len
 integer*4,pointer :: contacts(:,:)
 
 num_of_args = IARGC()
-if (num_of_args .ne. 2) stop 'Number of arguments not equals 2! The first one is filename, the second one is resolution. For example ". ./dpd name.geo 100000"'
+if (num_of_args .ne. 3) stop 'Number of arguments not equals 3! The 1st one is filename, the 2nd one is resolution, and the 3rd one is chain length. For example ". ./dpd name.geo 100000"'
 CALL GETARG (1,geo_file)
 CALL GETARG (2,resstr)
 read(resstr,'(I18)') resolution
+CALL GETARG (3,resstr)
+read(resstr,'(I18)') def_chr_len
 
 end
 
@@ -345,7 +347,7 @@ subroutine read_geo()
 ! #####################################################################
 implicit none
 save
-common /bio_input/ resolution, geo_file, contacts ! input parameters
+common /bio_input/ resolution, geo_file, contacts, def_chr_len ! input parameters
 common /cella/ dlxa,dlya,dlza
 common /den/ rho
 
@@ -356,7 +358,7 @@ integer*4, pointer :: arrLengthsOfChains(:)
 real*4,pointer :: rxt(:),ryt(:),rzt(:)
 character*32 :: chrName(100)
 
-integer*8 resolution
+integer*8 resolution, def_chr_len
 integer*8 pos1start, pos1end, pos2start, pos2end, pos1, pos2
 integer*4 nlines
 integer*4 numberOfChr, iter
@@ -436,8 +438,13 @@ end do
 close(14, status = 'keep')
 open(14, file = geo_file, status = 'old')
 allocate(arrLengthsOfChains(numberOfChr))
+
 do i=1,numberOfChr
-    arrLengthsOfChains(i)=CEILING(real(maxChrLength(i)-minChrLength(i))/real(resolution))
+    if (def_chr_len > 0) then
+        arrLengthsOfChains(i) = def_chr_len
+    else
+        arrLengthsOfChains(i)=CEILING(real(maxChrLength(i)-minChrLength(i))/real(resolution))
+    end if
 end do
 totalNumberOfChainBeads = sum(arrLengthsOfChains)
 allocate(contacts(totalNumberOfChainBeads*10,2))
