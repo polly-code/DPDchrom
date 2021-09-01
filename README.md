@@ -6,7 +6,7 @@ DPDchrom is developed to reconstruct 3D chromatin conformation using single cell
 
 ## Installation
 
-To install DPDchrom, put in the same folder `makefile` and `DPDchrom.f90`, then compile the fortran code with any fortran compiler, simply type 
+To install DPDchrom, put in the same folder `makefile` and `DPDchrom.f90`, then compile the fortran code with any fortran compiler. 
 > make
 
 DPDchrom is ready to run.
@@ -19,9 +19,9 @@ In the test folder there is an example of input `37420_*.csv` [[3](#references)]
 
 `1,1,3200000,3400000,3200000,3400000,1`
 
-To perform calculations execute DPDchrom in the command line passing two arguments, _/path/to/file_ and resolution in bp. Example of the command to reconstruct conformation using file `myfile` at resolution _100 Kb_:
+To perform calculations execute DPDchrom in the command line passing **3** arguments, _/path/to/file_, resolution in bp, and chain length. Path to file and resolution are self-descriptive. If you want to reconstruct a single chain with a fixed length, then pass the number of beads. When you don't want to define chain length or have several chain, please, pass **0**. Example of the command to reconstruct conformation using file `myfile` at resolution _100 Kb_:
 
-> ./DPDchrom /home/work/myfile 100000
+> ./DPDchrom /home/work/myfile 100000 0
 
 ## Postprocessing
 
@@ -31,7 +31,7 @@ To compare structures with each other, there is a script `imj_acc.py` provided a
 
 ## Spin-off
 
-In the folder _cmd_ you can find input files for CMD calculations in [LAMMPS](https://github.com/lammps/lammps).
+In the folder _cmd_ you can find input files for CMD calculations for [LAMMPS](https://github.com/lammps/lammps).
 
 ## References
 
