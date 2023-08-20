@@ -447,7 +447,7 @@ do i=1,numberOfChr
     end if
 end do
 totalNumberOfChainBeads = sum(arrLengthsOfChains)
-allocate(contacts(totalNumberOfChainBeads*10,2))
+allocate(contacts(totalNumberOfChainBeads*20,2))
 contacts=0
 iter=1
 iter2=1
