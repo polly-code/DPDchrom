@@ -2,11 +2,11 @@
 
 ## General description
 
-DPDchrom is developed to reconstruct 3D chromatin conformation using single cell Hi-C contact map. This method is based on DPD [[1](#references)]. Previous version with manual preparation published [[2](#references)] and available [here](https://github.com/polly-code/DPD_withRemovingBonds). It means that thermostat is embedded into a motion calculation. Solvent is taken into account explicitly. Due to the soft repultion, one can use large integration time step, dt=0.04. This software takes contact matrix as an input and produces chromatin conformation as an output.
+DPDchrom is developed to reconstruct 3D chromatin conformation using a single-cell Hi-C contact map. This method is based on DPD [[1](#references)]. Previous version with manual preparation published [[2](#references)] and available [here](https://github.com/polly-code/DPD_withRemovingBonds). It means that the thermostat is embedded into a motion calculation. A solvent is taken into account explicitly. Due to the soft repulsion, one can use a large integration time step, dt=0.04. This software takes the contact matrix as an input and produces chromatin conformation as an output.
 
 ## Installation
 
-To install DPDchrom, put in the same folder `makefile` and `DPDchrom.f90`, then compile the fortran code with any fortran compiler. 
+To install DPDchrom, put in the same folder `makefile` and `DPDchrom.f90`, then compile the Fortran code with any Fortran compiler. 
 > make
 
 DPDchrom is ready to run.
@@ -19,15 +19,15 @@ In the test folder there is an example of input `37420_*.csv` [[3](#references)]
 
 `1,1,3200000,3400000,3200000,3400000,1`
 
-To perform calculations execute DPDchrom in the command line passing **3** arguments, _/path/to/file_, resolution in bp, and chain length. Path to file and resolution are self-descriptive. If you want to reconstruct a single chain with a fixed length, then pass the number of beads. When you don't want to define chain length or have several chain, please, pass **0**. Example of the command to reconstruct conformation using file `myfile` at resolution _100 Kb_:
+To perform calculations execute DPDchrom in the command line passing **3** arguments, _/path/to/file_, resolution in bp, and chain length. Path to file and resolution are self-descriptive. If you want to reconstruct a single chain with a fixed length, then pass the number of beads. When you don't want to define chain length or have several chains, please, pass **0**. Example of the command to reconstruct conformation using file `myfile` at resolution _100 Kb_:
 
 > ./DPDchrom /home/work/myfile 100000 0
 
 ## Postprocessing
 
-The format of output file with conformation is customed. In order to convert it to _mol2_ format, there is a script `rst2mol2.py` in _py_script_ folder. Moreover there is an opportunity to remove periodic boundary conditions properly.
+The format of the output file with conformation is custom. In order to convert it to _mol2_ format, there is a script `rst2mol2.py` in _py_script_ folder. Moreover, there is an opportunity to remove periodic boundary conditions properly.
 
-To compare structures with each other, there is a script `imj_acc.py` provided as a template to calculate similarity (reconstruction accuracy) as Modified Jaccard Index.
+To compare structures with each other, there is a script `imj_acc.py` provided as a template to calculate similarity (reconstruction accuracy) as the Modified Jaccard Index.
 
 ## Spin-off
 
